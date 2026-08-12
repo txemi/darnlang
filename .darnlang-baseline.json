@@ -1,0 +1,9 @@
+{
+  "count": 0,
+  "note": "Legacy foreign-language lines. This number may only DECREASE.",
+  "scanned_exts": [
+    ".md",
+    ".py"
+  ],
+  "files": {}
+}

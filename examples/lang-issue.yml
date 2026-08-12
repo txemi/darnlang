@@ -1,0 +1,82 @@
+# Issues — copy this into a consumer's `.github/workflows/`.
+#
+# WHY THIS IS A SEPARATE, WEAKER MECHANISM, AND SAYS SO. Every other surface has a wall: a hook
+# refuses the commit, a red check blocks the merge. An issue has neither — GitHub has no
+# pre-publication hook for issues, so by the time any automation runs the text is already public.
+# The honest design is therefore not a gate but a SIGNAL: label it, and say so once.
+#
+# It still earns its place. On the public repo this tool was extracted from, both open issues were
+# written in the wrong language and had been for days, with CI green the whole time, because nothing
+# anywhere was looking at that surface. A visible label in the issue list is the difference between
+# "found in three days" and "found never".
+#
+# Note for people arriving from outside a project that uses this: it is a house rule about the
+# language the project is written in, not a filter on who may report a bug. A report in another
+# language is welcome and will be read as it stands — the label is a to-do, not a rejection.
+name: lang-issue
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  english:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv pip install --system darnlang
+
+      - name: Judge the issue title and body
+        id: check
+        # Through the environment, never through the shell: an issue title on a public repo is
+        # written by anyone at all.
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          printf '%s\n\n%s\n' "$ISSUE_TITLE" "$ISSUE_BODY" > "$RUNNER_TEMP/issue.txt"
+          if darnlang prose "$RUNNER_TEMP/issue.txt" --label issue; then
+            echo "clean=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "clean=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Flag it
+        if: steps.check.outputs.clean == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          # Already labelled means it was already commented on: `edited` fires on every batch of
+          # changes GitHub sends, and a bot that repeats itself gets muted.
+          ALREADY: ${{ contains(github.event.issue.labels.*.name, 'needs-translation') }}
+        run: |
+          gh label create needs-translation -R "$REPO" \
+            --color D93F0B --description "Written in another language; needs translating" || true
+          gh issue edit "$NUMBER" -R "$REPO" --add-label needs-translation
+          if [ "$ALREADY" != "true" ]; then
+            cat > "$RUNNER_TEMP/comment.md" <<EOF
+          This project is written in one language throughout — code, docs, commit messages, PR titles
+          and issues (see CONTRIBUTING). This issue looks like it is in another one, so it has been
+          labelled \`needs-translation\`.
+
+          Nothing is wrong with the report itself and it will be read as it stands; the label only
+          marks that the text still needs translating.
+          EOF
+            gh issue comment "$NUMBER" -R "$REPO" --body-file "$RUNNER_TEMP/comment.md"
+          fi
+          # Fail on purpose: the red run is the durable record. A label can be removed by hand and a
+          # comment scrolls away, but the run stays attached to the event.
+          exit 1
+
+      - name: Clear the flag once it is translated
+        if: steps.check.outputs.clean == 'true' && contains(github.event.issue.labels.*.name, 'needs-translation')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: gh issue edit "$NUMBER" -R "$REPO" --remove-label needs-translation

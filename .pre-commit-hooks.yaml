@@ -1,0 +1,33 @@
+# Hooks a consumer gets for free with:
+#
+#   repos:
+#     - repo: https://github.com/txemi/darnlang
+#       rev: v0.1.0
+#       hooks: [{id: darnlang}, {id: darnlang-commit-msg}]
+#
+# Two hooks and not one, because they guard different things at different moments: `darnlang` judges
+# the lines a commit ADDS, and `darnlang-commit-msg` judges the message describing them — the only
+# moment that message is still free to fix. Once it is pushed and merged it is permanent.
+
+- id: darnlang
+  name: darnlang (added lines)
+  description: Fail the commit if the lines it adds are in the wrong language.
+  entry: darnlang check --diff
+  language: python
+  pass_filenames: false
+  always_run: true
+
+- id: darnlang-commit-msg
+  name: darnlang (commit message)
+  description: Fail the commit if its MESSAGE is in the wrong language.
+  entry: darnlang prose --git-comments --label "commit message"
+  language: python
+  stages: [commit-msg]
+
+- id: darnlang-baseline
+  name: darnlang (whole tree vs baseline)
+  description: The ratchet over the whole tree. For pre-push, where a slower whole-repo pass is affordable.
+  entry: darnlang check
+  language: python
+  pass_filenames: false
+  always_run: true

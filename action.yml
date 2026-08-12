@@ -1,0 +1,70 @@
+# A composite action, so a consumer wires the published surfaces in one block instead of
+# reinventing the three steps — which is how they end up subtly different per repo, which is the
+# whole problem this tool was extracted to stop.
+name: darnlang
+description: Keep a repo's prose in one language — files, commit messages, and PR title/description.
+branding:
+  icon: message-square
+  color: purple
+
+inputs:
+  ext:
+    description: Extensions to scan, comma-separated, or 'all'.
+    required: false
+    default: .py
+  surfaces:
+    description: Which surfaces to judge, comma-separated: files, commits, pr.
+    required: false
+    default: files,commits,pr
+  version:
+    description: Version of darnlang to install (a PyPI specifier or a git ref).
+    required: false
+    default: darnlang
+  show-text:
+    description: Print the offending lines. Off by default — CI logs of a public repo are public.
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Install darnlang
+      shell: bash
+      run: pipx install "${{ inputs.version }}" || pip install --user "${{ inputs.version }}"
+
+    - name: Files (whole tree vs the baseline)
+      if: contains(inputs.surfaces, 'files')
+      shell: bash
+      run: |
+        darnlang check --ext "${{ inputs.ext }}" \
+          ${{ inputs.show-text == 'true' && '--show-text' || '' }}
+
+    # Tied to the COMMITS, so it belongs on an event that fires when they change (`synchronize`).
+    # Needs `fetch-depth: 0` on the checkout: with the default depth of 1 there is no range to walk.
+    - name: Commit messages added by this PR
+      if: contains(inputs.surfaces, 'commits') && github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        git log --format=%B \
+          "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
+          > "$RUNNER_TEMP/msgs.txt"
+        darnlang prose "$RUNNER_TEMP/msgs.txt" --label "set of commit messages"
+
+    # The text travels through the environment, NEVER interpolated into `run:`. A PR title on a
+    # public repo is written by anyone at all, and `run: echo "${{ github.event… }}"` is script
+    # injection.
+    - name: PR title and description
+      if: contains(inputs.surfaces, 'pr') && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+      run: |
+        printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr.txt"
+        darnlang prose "$RUNNER_TEMP/pr.txt" --label "PR title/description"
+
+# ⚠️ ISSUES ARE NOT HERE, and the omission is deliberate rather than pending. GitHub has no
+# pre-publication hook for an issue, so nothing can gate one: by the time any automation runs, the
+# text is public. An issue check has to live in its own workflow on `issues: [opened, edited]`, and
+# it can only label and comment. Putting it in this action would suggest a wall that does not exist.
+# See `examples/lang-issue.yml` for a workflow that does it honestly.

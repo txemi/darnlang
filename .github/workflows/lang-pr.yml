@@ -1,0 +1,35 @@
+# The PR title/description check, in its OWN workflow — and that is the whole point of the file.
+#
+# `on: pull_request` defaults to [opened, synchronize, reopened]. `edited` is not among them, so a
+# title check living in `ci.yml` has two failure modes, and the second is worse than having no check
+# at all:
+#
+#   * open with a bad title -> red; fix the title -> STILL red, because nothing re-ran. The only way
+#     out is an empty commit, which is how a check teaches people to route around it;
+#   * open in the right language and rename afterwards -> never looked at again. The gate would be
+#     satisfiable by waiting.
+#
+# Adding `edited` to `ci.yml` instead would re-run the whole test matrix on every typo fix in a
+# description. This job needs no toolchain, so it costs seconds.
+name: lang-pr
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  title-and-body:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv pip install --system -e .
+      - name: PR title and description
+        # Through the environment, never interpolated into the shell: a PR title on a public repo is
+        # attacker-controlled, and `run: echo "${{ github.event… }}"` is script injection.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr.txt"
+          darnlang prose "$RUNNER_TEMP/pr.txt" --label "PR title/description"

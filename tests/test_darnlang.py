@@ -1,0 +1,216 @@
+"""Tests for darnlang.
+
+They pin the DECISIONS, not the dictionary: what counts as prose per file family, what is exempt,
+how the two path resolutions stay in step, and what a coverage change is called. Every one of them
+corresponds to a bug that actually happened in the vendored ancestors of this tool — which had no
+tests at all, and that is how the bugs survived.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+
+import pytest
+
+from darnlang import baseline as bl
+from darnlang.cli import main
+from darnlang.detect import DEFAULT_PATTERN, build_pattern, offending
+from darnlang.project import baseline_path, project_root
+from darnlang.scan import scan_prose, scan_tree
+
+SPANISH_DOC = "La receta falla abierta por defecto: un commit offline no se bloquea"
+SPANISH_HTML = f"<p>{SPANISH_DOC}</p>"
+
+
+def _repo(tmp_path, files: dict[str, str]):
+    for rel, body in files.items():
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    return tmp_path
+
+
+def _run(argv, cwd) -> int:
+    old = os.getcwd()
+    os.chdir(cwd)
+    try:
+        return main(argv)
+    finally:
+        os.chdir(old)
+
+
+# --- the prose rule, per family ---------------------------------------------------------------
+
+def test_markdown_paragraph_is_judged_although_it_carries_code_punctuation():
+    """The bug that let Spanish sit in a CHANGELOG under a green gate: the code rule rejects any
+    line with `:` or `(`, which is most of a written paragraph."""
+    assert offending(SPANISH_DOC, "CHANGELOG.md", DEFAULT_PATTERN)
+    assert not offending(SPANISH_DOC, "CHANGELOG.md", DEFAULT_PATTERN, in_fence=True)
+
+
+def test_html_interface_text_is_judged():
+    """The bug NO ancestor fixed. One opened `.html` to the scan but kept the code rule, so a
+    320-line Spanish interface template stayed invisible line by line."""
+    assert offending(SPANISH_HTML, "views/index.html", DEFAULT_PATTERN)
+
+
+def test_python_is_still_judged_by_the_comment_rule():
+    assert offending("# esto no puede pasar aqui", "x.py", DEFAULT_PATTERN)
+    assert not offending("total = para_value + 1", "x.py", DEFAULT_PATTERN)
+
+
+def test_unknown_extension_is_treated_as_prose_not_as_code():
+    assert offending(SPANISH_DOC, "notes.adoc", DEFAULT_PATTERN)
+
+
+@pytest.mark.parametrize("line", [
+    "See `docs/investigacion-de-errores.md` for the details.",
+    "See https://example.invalid/una-pagina-con-nombre-largo for the details.",
+    f"{SPANISH_DOC}  lang-ok",
+])
+def test_identifiers_urls_and_the_escape_hatch_are_exempt(line):
+    assert not offending(line, "README.md", DEFAULT_PATTERN)
+
+
+def test_solo_and_sin_are_english_words_and_do_not_fire():
+    assert not scan_prose("Fine solo; with several sessions it is not.", DEFAULT_PATTERN)
+    assert not scan_prose("since math.sin is a looping function", DEFAULT_PATTERN)
+    assert scan_prose("sólo se comprueba al escribir", DEFAULT_PATTERN)
+
+
+# --- free prose: the surfaces a file gate cannot see -------------------------------------------
+
+def test_git_template_comments_are_not_judged():
+    """git writes its template in the machine's LOCALE. Judging it fails the author for text they
+    did not write and git is about to strip."""
+    msg = "fix: keep the fence state per file\n\n# Por favor ingresa el mensaje de confirmacion\n"
+    assert not scan_prose(msg, DEFAULT_PATTERN, git_comments=True)
+    assert scan_prose(msg, DEFAULT_PATTERN)  # …so the exemption is the flag's doing
+
+
+def test_verbose_commit_diff_below_the_scissors_is_not_judged():
+    msg = ("fix: something\n"
+           "# ------------------------ >8 ------------------------\n"
+           "+# esto es una linea del diff que git pega con --verbose\n")
+    assert not scan_prose(msg, DEFAULT_PATTERN, git_comments=True)
+
+
+def test_fenced_output_pasted_into_an_issue_is_not_judged():
+    body = ("The gate misses this case:\n\n```\n"
+            "docs/investigacion.md: enlace roto para el destino que no existe\n"
+            "```\n\nExpected: a finding.\n")
+    assert not scan_prose(body, DEFAULT_PATTERN)
+
+
+def test_prose_mode_exit_codes(tmp_path):
+    (tmp_path / "msg.txt").write_text(SPANISH_DOC, encoding="utf-8")
+    assert _run(["prose", str(tmp_path / "msg.txt")], tmp_path) == 1
+    (tmp_path / "ok.txt").write_text("gate the surfaces that get published", encoding="utf-8")
+    assert _run(["prose", str(tmp_path / "ok.txt")], tmp_path) == 0
+
+
+def test_an_unreadable_message_fails_closed(tmp_path):
+    """This mode exists for the surfaces nothing else watches; unreadable is not clean."""
+    assert _run(["prose", str(tmp_path / "nope.txt")], tmp_path) == 3
+
+
+# --- one root, two derived values ---------------------------------------------------------------
+
+def test_the_scanned_tree_and_the_baseline_come_from_the_same_root(tmp_path):
+    """The bug this tool was extracted over: two parallel resolutions drifted, and the gate
+    congratulated a repo on debt it had never looked at. They are derived now, so they cannot."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# hola que tal esto es prosa\n"})
+    sub = repo / "deep" / "deeper"
+    sub.mkdir(parents=True)
+    root = project_root(str(sub))
+    assert os.path.realpath(root) == os.path.realpath(str(repo))
+    assert baseline_path(root).startswith(os.path.realpath(str(repo)))
+
+
+def test_running_from_a_subdirectory_gives_the_same_verdict(tmp_path):
+    repo = _repo(tmp_path / "repo", {"a.py": "# hola que tal, esto es prosa\n"})
+    sub = repo / "sub"
+    sub.mkdir()
+    assert _run(["update-baseline"], repo) == 0
+    assert _run(["check"], repo) == 0
+    assert _run(["check"], sub) == 0
+
+
+def test_a_legacy_baseline_location_is_still_honoured(tmp_path):
+    repo = _repo(tmp_path / "repo", {"tools/lang_gate_baseline.json":
+                                     json.dumps({"count": 0, "files": {}})})
+    assert baseline_path(project_root(str(repo))).endswith(
+        os.path.join("tools", "lang_gate_baseline.json"))
+
+
+# --- the ratchet, and what a coverage change is called ------------------------------------------
+
+def test_a_clean_repo_is_fail_closed_at_zero(tmp_path):
+    repo = _repo(tmp_path / "repo", {"a.py": "# perfectly ordinary english\n"})
+    assert _run(["update-baseline"], repo) == 0
+    assert _run(["check"], repo) == 0
+    (repo / "b.py").write_text("# esto es prosa que no deberia estar aqui\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    assert _run(["check"], repo) == 1
+
+
+def test_widening_coverage_is_reported_as_an_adoption_not_as_a_regression(tmp_path):
+    """Reported as "the count GREW -- do NOT raise the baseline", the advice would be backwards:
+    re-seeding once IS the correct move when the tool starts judging more."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english only here\n", "DOC.md": SPANISH_DOC + "\n"})
+    assert _run(["update-baseline"], repo) == 0            # covers .py, count 0
+    assert _run(["check", "--ext", ".py,.md"], repo) == 2  # coverage changed -> its own code
+    assert _run(["update-baseline", "--ext", ".py,.md"], repo) == 0
+    assert _run(["check", "--ext", ".py,.md"], repo) == 0  # re-seeded: the debt is now the floor
+
+
+def test_a_baseline_predating_the_field_is_not_a_coverage_change(tmp_path):
+    """Consumers on the old format have no `scanned_exts`. Absent must mean "unknown", not
+    "empty", or every one of them fails on a key it has never heard of."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    bl.save(baseline_path(project_root(str(repo))), 0, [".py"], {})
+    data = json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))
+    del data["scanned_exts"]
+    (repo / ".darnlang-baseline.json").write_text(json.dumps(data), encoding="utf-8")
+    assert _run(["check"], repo) == 0
+
+
+def test_a_missing_baseline_is_an_environment_error_not_a_pass(tmp_path):
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    assert _run(["check"], repo) == 3
+
+
+# --- file names ---------------------------------------------------------------------------------
+
+def test_file_names_are_judged_too(tmp_path):
+    """No ancestor did this, it costs nothing, and a file name is exactly as public as its
+    contents."""
+    repo = _repo(tmp_path / "repo", {"análisis_errores.py": "# english inside\n"})
+    hits = scan_tree(str(repo), (".py",), DEFAULT_PATTERN)
+    assert any(h.code == "filename" for h in hits)
+    assert not any(h.code == "filename"
+                   for h in scan_tree(str(repo), (".py",), DEFAULT_PATTERN, filenames=False))
+
+
+def test_the_built_in_wordlist_barely_helps_on_file_names(tmp_path):
+    """Stated as a test rather than left to be discovered: the built-in list is FUNCTION words, and
+    file names are made of CONTENT words, so unaccented names slip through. Accents catch them, and
+    a repo wordlist with content words catches the rest. Pinning it here so nobody reads
+    `filenames=True` as a guarantee it cannot give."""
+    repo = _repo(tmp_path / "repo", {"analisis_errores.py": "# english inside\n"})
+    assert not [h for h in scan_tree(str(repo), (".py",), DEFAULT_PATTERN) if h.code == "filename"]
+    custom = build_pattern(["analisis", "errores"])
+    assert [h for h in scan_tree(str(repo), (".py",), custom) if h.code == "filename"]
+
+
+# --- the wordlist ---------------------------------------------------------------------------------
+
+def test_a_repo_wordlist_replaces_the_built_in_one():
+    pattern = build_pattern(["gaztelania"])
+    assert pattern.search("hau gaztelania da")
+    assert not pattern.search("esto que tal")   # built-in words are gone…
+    assert pattern.search("una decisión")       # …but accents always count

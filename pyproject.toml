@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "darnlang"
+version = "0.1.0"
+description = "Keep a repository's prose in one language — code, docs, commit messages, PR titles and issues — with a ratchet for legacy debt."
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.10"
+authors = [{ name = "txemi" }]
+keywords = ["linter", "quality-gate", "pre-commit", "i18n", "language", "ratchet"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+]
+# No runtime dependencies, on purpose. It is what lets the gate run first in a pre-commit that
+# fires dozens of times a day, and what stops it becoming a silent no-op on an unprovisioned
+# machine. The deep detection layer lives behind an extra so nobody pays for what they do not use.
+dependencies = []
+
+[project.optional-dependencies]
+strict = ["langdetect>=1.0.9"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+darnlang = "darnlang.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/txemi/darnlang"
+Repository = "https://github.com/txemi/darnlang"
+Issues = "https://github.com/txemi/darnlang/issues"
+Changelog = "https://github.com/txemi/darnlang/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/darnlang"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

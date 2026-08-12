@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Windows is in the matrix on purpose: this tool splits paths, reads git output and judges file
+  # NAMES, and those are exactly where a Linux-only assumption breaks silently on somebody else's
+  # machine.
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv pip install --system -e ".[dev]"
+      - run: python -m pytest -q
+
+  # Dogfood. A language gate that is not clean in its own repo has no argument to make.
+  self:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # the commit-message step below needs a range to walk
+      - uses: astral-sh/setup-uv@v5
+      - run: uv pip install --system -e .
+      - name: Files (this repo pins its baseline at 0)
+        run: darnlang check --ext .py,.md
+      - name: Commit messages added by this PR
+        if: github.event_name == 'pull_request'
+        run: |
+          git log --format=%B \
+            "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
+            > "$RUNNER_TEMP/msgs.txt"
+          darnlang prose "$RUNNER_TEMP/msgs.txt" --label "set of commit messages"
+
+  # Proves the thing a user actually types, from a clean environment and with no dev extras.
+  smoke:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: uvx from this commit
+        run: uvx --from . darnlang check --ext .py,.md
