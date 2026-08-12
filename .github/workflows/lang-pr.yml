@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv venv
+      - run: uv venv --clear   # setup-uv already makes one when given a python-version
       - run: uv pip install -e .
       - name: PR title and description
         # Through the environment, never interpolated into the shell: a PR title on a public repo is
