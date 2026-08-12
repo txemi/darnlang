@@ -20,8 +20,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv pip install --system -e ".[dev]"
-      - run: python -m pytest -q
+      # A venv, not `--system`: GitHub runners ship an externally managed interpreter, and
+      # `uv pip install --system` fails on it. `uv run` then uses that venv on both OSes,
+      # which is also why the Windows job could find the package but not pytest.
+      - run: uv venv
+      - run: uv pip install -e ".[dev]"
+      - run: uv run pytest -q
 
   # Dogfood. A language gate that is not clean in its own repo has no argument to make.
   self:
@@ -31,16 +35,17 @@ jobs:
         with:
           fetch-depth: 0    # the commit-message step below needs a range to walk
       - uses: astral-sh/setup-uv@v5
-      - run: uv pip install --system -e .
+      - run: uv venv
+      - run: uv pip install -e .
       - name: Files (this repo pins its baseline at 0)
-        run: darnlang check --ext .py,.md
+        run: uv run darnlang check --ext .py,.md
       - name: Commit messages added by this PR
         if: github.event_name == 'pull_request'
         run: |
           git log --format=%B \
             "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
             > "$RUNNER_TEMP/msgs.txt"
-          darnlang prose "$RUNNER_TEMP/msgs.txt" --label "set of commit messages"
+          uv run darnlang prose "$RUNNER_TEMP/msgs.txt" --label "set of commit messages"
 
   # Proves the thing a user actually types, from a clean environment and with no dev extras.
   smoke:

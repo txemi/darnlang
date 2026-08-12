@@ -21,7 +21,7 @@ import sys
 from . import baseline as bl
 from .detect import CODE_EXTS, DOC_EXTS, ESCAPE, build_pattern, langdetect_says_foreign
 from .project import baseline_path, project_root
-from .scan import Hit, scan_diff, scan_prose, scan_tree
+from .scan import Hit, NothingToScan, scan_diff, scan_prose, scan_tree
 
 DEFAULT_EXTS = (".py",)
 WORDS_FILENAMES = ("darnlang-words.txt", os.path.join("tools", "spanish_words.txt"),
@@ -137,7 +137,14 @@ def main(argv: list[str] | None = None) -> int:
         print("darnlang: OK -- nothing new.")
         return 0
 
-    hits = scan_tree(root, exts, pattern, filenames=not args.no_filenames)
+    try:
+        hits = scan_tree(root, exts, pattern, filenames=not args.no_filenames)
+    except NothingToScan as exc:
+        # Exit 3 (environment), never 0. "I examined nothing" is not "I found nothing", and the
+        # difference is the whole reliability of a ratchet: a baseline seeded against zero files
+        # becomes a floor of 0 that then passes forever.
+        print(f"darnlang: {exc}", file=sys.stderr)
+        return 3
     if args.strict:
         hits = _add_langdetect(root, exts, hits)
     per_file: dict[str, int] = {}

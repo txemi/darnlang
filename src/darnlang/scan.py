@@ -40,6 +40,18 @@ def _scan_lines(rel: str, lines: list[str], pattern) -> list[Hit]:
     return hits
 
 
+class NothingToScan(Exception):
+    """No file was examined. NEVER the same answer as "nothing was wrong".
+
+    Raised rather than returning an empty list, because the empty list is indistinguishable from a
+    clean tree and every caller would report it as a pass. This is not hypothetical: seeding a
+    baseline in a repo whose files were not yet committed produced `count: 0` with a cheerful
+    message, and that zero would then have become the floor the ratchet defends — a gate calibrated
+    against nothing, reporting success forever. It happened while writing this tool's own first
+    commit.
+    """
+
+
 def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = True,
               tracked_only: bool = True) -> list[Hit]:
     """Every offending line under `root`.
@@ -50,9 +62,20 @@ def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = Tr
 
     `filenames` also judges the NAME of each file. No ancestor of this tool did that, it costs
     nothing, and a file called `investigacion_de_errores.py` is exactly as public as its contents.
+
+    Raises NothingToScan when the file list is empty, or when no file matched `exts`.
     """
+    files = _files(root, tracked_only)
+    if not files:
+        raise NothingToScan(
+            f"no files to scan under {root}. If this is a git repo, nothing is committed yet "
+            f"(a scan of zero files is not a clean scan); otherwise check the path.")
+    if exts and not any(rel.lower().endswith(exts) for rel in files):
+        raise NothingToScan(
+            f"none of the {len(files)} files under {root} match {', '.join(exts)}. "
+            f"Widen --ext, or you are measuring nothing.")
     hits: list[Hit] = []
-    for rel in _files(root, tracked_only):
+    for rel in files:
         if exts and not rel.lower().endswith(exts):
             continue
         try:
@@ -70,7 +93,7 @@ def _files(root: str, tracked_only: bool) -> list[str]:
     if tracked_only:
         try:
             # `-z` and `core.quotePath=false` are not cosmetic. By default git RENDERS a non-ASCII
-            # path as an escaped C string -- `análisis.py` arrives as `"an\303\241lisis.py"` -- so
+            # path as an escaped C string -- an accented name arrives as `"an\303\241lisis.py"` -- so  # lang-ok
             # the accent that the name check exists to find never reaches the detector, and a file
             # named in the wrong language passes because of how it was named. Caught by a test, and
             # invisible without one.

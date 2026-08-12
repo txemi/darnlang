@@ -98,8 +98,8 @@ def is_commentish(line: str) -> bool:
     nobody wants to translate.
 
     `del` is in the keyword list for a reason that took measuring to see: `del frame` is a whole
-    statement with no punctuation, so without it the line reads as prose and `del` — high-signal
-    Spanish — fires on real code.
+    statement with no punctuation, so without it the line reads as prose and the word — high-signal
+    in the other language — fires on real code.
     """
     s = line.strip()
     if s.startswith("#"):

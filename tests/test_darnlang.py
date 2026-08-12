@@ -214,3 +214,24 @@ def test_a_repo_wordlist_replaces_the_built_in_one():
     assert pattern.search("hau gaztelania da")
     assert not pattern.search("esto que tal")   # built-in words are gone…
     assert pattern.search("una decisión")       # …but accents always count
+
+
+# --- "I examined nothing" is not "I found nothing" ----------------------------------------------
+
+def test_a_repo_with_nothing_committed_is_an_error_not_a_clean_scan(tmp_path):
+    """The trap this tool fell into on its own first commit: the baseline was seeded before the
+    files were committed, `git ls-files` returned nothing, and the tool cheerfully wrote `count: 0`.
+    That zero would then have become the floor the ratchet defends — a gate calibrated against
+    nothing, green forever."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("# hola que tal esto es prosa\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)  # note: nothing added
+    assert _run(["update-baseline"], repo) == 3
+    assert _run(["check"], repo) == 3
+    assert not (repo / ".darnlang-baseline.json").exists()
+
+
+def test_scanning_a_tree_where_no_file_matches_the_extensions_is_an_error(tmp_path):
+    repo = _repo(tmp_path / "repo", {"README.md": "english only\n"})
+    assert _run(["update-baseline", "--ext", ".py"], repo) == 3

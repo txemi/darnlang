@@ -23,7 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv pip install --system -e .
+      - run: uv venv
+      - run: uv pip install -e .
       - name: PR title and description
         # Through the environment, never interpolated into the shell: a PR title on a public repo is
         # attacker-controlled, and `run: echo "${{ github.event… }}"` is script injection.
@@ -32,4 +33,4 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr.txt"
-          darnlang prose "$RUNNER_TEMP/pr.txt" --label "PR title/description"
+          uv run darnlang prose "$RUNNER_TEMP/pr.txt" --label "PR title/description"
