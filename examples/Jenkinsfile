@@ -1,0 +1,78 @@
+// A COMPLETE Jenkins pipeline, not a fragment to assemble.
+//
+// Fragments are how you end up with a wall that fails open: the piece everyone forgets is the one
+// that distinguishes "the gate ran and found debt" from "the gate could not run", and a pipeline
+// that treats the second as success is a green build with nothing validated.
+//
+// Why Jenkins is worth documenting at all: a self-hosted controller does not meter minutes and does
+// not stop because a payment failed. When a hosted CI goes quiet for billing reasons — which is not
+// hypothetical — this is the wall still standing.
+
+pipeline {
+  agent any
+
+  environment {
+    // Pin the version. `uvx darnlang` alone resolves to whatever is newest, so a detector
+    // improvement upstream could turn a green build red on a day nobody touched this repo.
+    DARNLANG = 'darnlang==0.1.0'
+    // Where `pip install --user` and uv put console scripts.
+    PATH = "${env.HOME}/.local/bin:${env.PATH}"
+  }
+
+  stages {
+    stage('darnlang: tracked files') {
+      steps {
+        script {
+          def rc = sh(returnStatus: true, script: """
+            set -eu
+            uvx --from "\$DARNLANG" darnlang check --ext .py,.md
+          """)
+          // 0 clean · 1 findings · 2 coverage changed (re-seed the baseline) · 3 could not run.
+          // All three non-zero cases fail the build, but they are NOT the same message, and saying
+          // which one it is saves the next person from reading the whole log.
+          if (rc == 3) {
+            error 'darnlang could not run (no baseline, or it scanned zero files). This is not a pass.'
+          }
+          if (rc == 2) {
+            error 'darnlang coverage changed: re-seed with `darnlang update-baseline` and commit it.'
+          }
+          if (rc != 0) {
+            error "darnlang found lines in the wrong language (rc=${rc})."
+          }
+        }
+      }
+    }
+
+    // Only on a change request. The Branch Source plugin exports CHANGE_TITLE / CHANGE_BODY /
+    // CHANGE_TARGET; outside a multibranch pipeline they do not exist and this stage is skipped.
+    stage('darnlang: the published surfaces') {
+      when { changeRequest() }
+      steps {
+        // The text travels through the ENVIRONMENT. `sh "echo ${env.CHANGE_TITLE}"` would be a
+        // shell injection: a change title is written by whoever opened the request. Single-quoted
+        // heredoc-style `'''` keeps Groovy out of it entirely.
+        sh '''
+          set -eu
+          printf '%s\\n\\n%s\\n' "$CHANGE_TITLE" "${CHANGE_BODY:-}" > darnlang-pr.txt
+          uvx --from "$DARNLANG" darnlang prose darnlang-pr.txt --label "PR title/description"
+
+          git fetch --no-tags origin "$CHANGE_TARGET"
+          git log --format=%B "origin/$CHANGE_TARGET..HEAD" > darnlang-msgs.txt
+          uvx --from "$DARNLANG" darnlang prose darnlang-msgs.txt --label "set of commit messages"
+        '''
+      }
+    }
+  }
+
+  post {
+    always {
+      // The files carry the very text the gate refused to let through, so they do not belong in a
+      // build artefact that outlives the run.
+      sh 'rm -f darnlang-pr.txt darnlang-msgs.txt'
+    }
+  }
+}
+
+// NOT COVERED HERE, and it cannot be: issues. No forge fires a webhook before an issue is
+// published, so nothing — Jenkins included — can gate one. That surface needs the forge's own
+// automation, which can label and comment but never block. See `examples/lang-issue.yml`.

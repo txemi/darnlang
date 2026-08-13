@@ -139,6 +139,65 @@ repos:
     surfaces: files,commits,pr    # issues need their own workflow: see action.yml
 ```
 
+**Jenkins** — a declarative stage (complete pipeline: [`examples/Jenkinsfile`](examples/Jenkinsfile)). Worth documenting rather than leaving as an exercise, because a
+self-hosted controller is often the wall that keeps working when a hosted one stops: it does not
+meter minutes and it does not stop because a card expired.
+
+```groovy
+stage('darnlang') {
+  steps {
+    sh '''
+      set -eu
+      # uvx needs no venv and leaves nothing behind. `pip install --user darnlang` works too.
+      export PATH="$HOME/.local/bin:$PATH"
+      uvx darnlang check --ext .py,.md
+    '''
+  }
+}
+```
+
+Three things that are specific to Jenkins and cost time to rediscover:
+
+- **The workspace is a real git checkout**, so the repo root resolves normally and the baseline is
+  found where you committed it. But a *shallow* clone (the default in many jobs) still carries the
+  full working tree, which is all this tool reads — no extra depth needed for `check`.
+- **Distinguish "there is debt" from "I could not run".** Exit `1` is findings, `3` is an
+  environment problem — a missing baseline, or a scan that examined **zero** files. Failing the
+  build on both is right; treating `3` as a pass is how a gate silently stops gating:
+
+  ```groovy
+  script {
+    def rc = sh(returnStatus: true, script: 'uvx darnlang check --ext .py,.md')
+    if (rc == 3) { error 'darnlang could not run — this is not a pass' }
+    if (rc != 0) { error "darnlang found issues (rc=${rc})" }
+  }
+  ```
+
+- **The PR surfaces work here too**, via the GitHub/Bitbucket Branch Source plugin, which exposes
+  the change's title and body as environment variables on a multibranch pipeline:
+
+  ```groovy
+  when { changeRequest() }
+  steps {
+    sh '''
+      set -eu
+      printf '%s\\n\\n%s\\n' "$CHANGE_TITLE" "${CHANGE_BODY:-}" > pr.txt
+      uvx darnlang prose pr.txt --label "PR title/description"
+      git log --format=%B "origin/${CHANGE_TARGET}..HEAD" > msgs.txt
+      uvx darnlang prose msgs.txt --label "set of commit messages"
+    '''
+  }
+  ```
+
+  Note the variables go through the environment, never interpolated into the Groovy string: a change
+  title is written by whoever opened it, and `sh "echo ${env.CHANGE_TITLE}"` is a shell injection.
+  Jenkins already exports them, so `"$CHANGE_TITLE"` inside single-quoted `'''` is both safer and
+  shorter.
+
+  **Issues have no Jenkins equivalent at all** — there is no webhook that fires before an issue is
+  published, on any forge. That surface stays with the forge's own automation
+  (`examples/lang-issue.yml`), and it can only label, never block.
+
 ## Why the matched text is not printed
 
 By default findings are reported as `path:line`, without the offending text. CI logs of a public
