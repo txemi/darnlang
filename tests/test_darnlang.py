@@ -272,9 +272,10 @@ def test_there_is_no_tree_level_strict(tmp_path):
 def test_strict_without_the_extra_refuses_instead_of_reporting_clean(tmp_path):
     """It used to warn and carry on, which means a caller who asked for the deep layer, did not get
     it, and saw exit 0 was told the tree is clean by a check that never ran."""
-    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
-    assert _run(["update-baseline"], repo) == 0
-    assert _run(["check", "--strict"], repo) == 3
+    msg = tmp_path / "m.txt"
+    msg.write_text("Perfectly ordinary English, so only layer 3 could have an opinion.\n",
+                   encoding="utf-8")
+    assert _run(["prose", str(msg), "--strict"], tmp_path) == 3
 
 
 @pytest.mark.skipif(not _has_langdetect(), reason="needs the 'strict' extra")
