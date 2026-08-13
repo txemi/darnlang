@@ -48,6 +48,8 @@ _WORDS = (
     r"antes|despu[eé]s|ahora|luego|donde|qui[eé]n|cu[aá]l|nada|algo|otro|otra|mismo|misma"  # lang-ok
 )
 _CHARS = r"[áéíóúñ¿¡]"
+#: The built-in list as a list, so `extra` words can be appended to it rather than replace it.
+DEFAULT_WORDS = [_WORDS]
 DEFAULT_PATTERN = re.compile(rf"\b(?:{_WORDS})\b|{_CHARS}", re.IGNORECASE)
 
 #: Accents alone, for repos that want the zero-false-positive layer and nothing else.
@@ -65,18 +67,26 @@ CODE_EXTS = frozenset({".py", ".pyi"})
 DOC_EXTS = frozenset({".md", ".markdown", ".rst", ".txt", ".html", ".htm", ".jinja", ".j2"})
 
 
-def build_pattern(words: list[str] | None) -> re.Pattern[str]:
-    """The detector regex, from a caller-supplied wordlist (or the built-in one when None).
+def build_pattern(words: list[str] | None, extra: list[str] | None = None) -> re.Pattern[str]:
+    """The detector regex: a wordlist (or the built-in one when None), plus optional EXTRA words.
 
-    A repo can hand its own list — the reason being that a curated list beats a clever regex for
-    short prose, and the person who knows which words matter in a given codebase is the person who
-    works in it, not the tool author.
+    A repo can hand its own list — a curated list beats a clever regex for short prose, and the
+    person who knows which words matter in a codebase is the person who works in it.
+
+    `extra` exists because REPLACING the built-in list is the wrong tool for the common case, and
+    that was measured. `solo` was removed from the default after it fired on ordinary English
+    ("fine solo; with several sessions it is not") — and in a Spanish-heavy repo that same removal
+    cost **16 genuine findings**, every one of them real prose whose only marker was that word. One
+    repo's false positive is another repo's only signal. Replacing the list to get one word back
+    would throw away the other forty; adding is what the situation actually calls for.
     """
-    if words is None:
-        return DEFAULT_PATTERN
-    if not words:
+    base = DEFAULT_WORDS if words is None else [w for w in words if w]
+    allw = list(base) + [w for w in (extra or []) if w]
+    if not allw:
         return CHARS_ONLY
-    alt = "|".join(re.escape(w) for w in words)
+    if words is None and not extra:
+        return DEFAULT_PATTERN
+    alt = "|".join(w if words is None else re.escape(w) for w in allw)
     return re.compile(rf"\b(?:{alt})\b|{_CHARS}", re.IGNORECASE)
 
 

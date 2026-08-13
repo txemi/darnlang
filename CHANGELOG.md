@@ -4,6 +4,19 @@ All notable changes to darnlang are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-08-13
+
+### Added
+- **`--extra-words-file`: ADD words to the list in use instead of replacing it.** Measured on the
+  largest consumer: `solo` was dropped from the default because it fires on ordinary English
+  (*"fine solo; with several sessions it is not"*), and that same removal cost **16 genuine
+  findings** in a Spanish-heavy repo — every one real prose whose only marker was that word.
+
+  One repo's false positive is another repo's only signal. Replacing the built-in list to recover a
+  single word would throw away the other forty, so the choice on offer is now the one the situation
+  actually calls for. `--words-file` still means "use exactly these", because a repo shipping a
+  curated list must not silently inherit a second opinion.
+
 ## [0.4.0] — 2026-08-13
 
 ### Fixed

@@ -462,3 +462,24 @@ def test_a_deliberate_cross_tree_comparison_is_still_possible(tmp_path, monkeypa
                        encoding="utf-8")
     monkeypatch.setenv("DARNLANG_ALLOW_FOREIGN_BASELINE", "1")
     assert _run(["check", "--baseline-file", str(foreign)], repo) == 0
+
+
+# --- extending the wordlist, rather than replacing it -------------------------------------------
+
+def test_extra_words_add_to_the_built_in_list_instead_of_replacing_it():
+    """Measured, not designed in the abstract: `solo` was dropped from the default after it fired on
+    ordinary English, and in a Spanish-heavy repo that same removal cost 16 genuine findings whose
+    only marker was that word. One repo's false positive is another repo's only signal. Replacing
+    the list to get one word back would throw away the other forty."""
+    p = build_pattern(None, ["solo"])
+    assert p.search("# Sugerencias solo si no existe")       # the word this repo needs back
+    assert p.search("# esto no puede pasar aqui")            # …and the built-in list still works
+    assert not DEFAULT_PATTERN.search("# Sugerencias solo si no existe")
+
+
+def test_a_replacement_wordlist_still_replaces(tmp_path):
+    """`--words-file` keeps meaning "use exactly these", because a repo that ships a curated list
+    (immich-autotag ships 100 words) must not silently inherit a second opinion."""
+    p = build_pattern(["gaztelania"])
+    assert p.search("hau gaztelania da")
+    assert not p.search("esto que tal")

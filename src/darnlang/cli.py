@@ -46,6 +46,17 @@ def _exts(arg: str | None) -> tuple[str, ...]:
                          for e in (x.strip().lower() for x in raw.split(",")) if e}))
 
 
+def _read_words(path: str | None) -> list[str] | None:
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return [ln.strip() for ln in fh if ln.strip() and not ln.startswith("#")]
+    except OSError as exc:
+        print(f"darnlang: cannot read {path} ({exc})", file=sys.stderr)
+        return None
+
+
 def _words(root: str, arg: str | None) -> list[str] | None:
     path = arg or next((p for p in (os.path.join(root, n) for n in WORDS_FILENAMES)
                         if os.path.exists(p)), None)
@@ -77,6 +88,9 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--root", help="project root (default: the git repo root of the cwd)")
     p.add_argument("--ext", help="extensions to scan, comma-separated, or 'all' (default: .py)")
     p.add_argument("--words-file", help="wordlist, one per line (default: auto-detected, else built-in)")
+    p.add_argument("--extra-words-file",
+                   help="words ADDED to the list in use (one per line) — for a word this repo needs "
+                        "that the default drops as too ambiguous elsewhere")
     p.add_argument("--baseline-file", help="explicit baseline location")
     p.add_argument("--show-text", action="store_true", help="print the offending line (local use)")
     p.add_argument("--no-filenames", action="store_true", help="do not judge file NAMES")
@@ -115,13 +129,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label", default="text", help="what to call it in the error message")
     p.add_argument("--show-text", action="store_true")
     p.add_argument("--words-file")
+    p.add_argument("--extra-words-file")
     p.add_argument("--root")
     p.add_argument("--strict", action="store_true",
                    help="also ask langdetect whether the whole text is English (needs the 'strict' extra)")
 
     args = ap.parse_args(argv)
     root = project_root(getattr(args, "root", None))
-    pattern = build_pattern(_words(root, getattr(args, "words_file", None)))
+    pattern = build_pattern(_words(root, getattr(args, "words_file", None)),
+                            _read_words(getattr(args, "extra_words_file", None)))
 
     if args.cmd == "prose":
         try:
