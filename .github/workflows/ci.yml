@@ -89,7 +89,7 @@ jobs:
       - name: Files, commit messages and PR text — via the action this repo ships
         uses: ./
         with:
-          ext: .py,.md
+          ext: all
           version: .
 
   # Proves the thing a user actually types, from a clean environment and with no dev extras.
