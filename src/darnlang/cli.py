@@ -133,11 +133,20 @@ def main(argv: list[str] | None = None) -> int:
             return 3
         hits = scan_prose(text, pattern, git_comments=args.git_comments)
         if not hits and args.strict:
-            # The cheap layers are weakest exactly here. Measured on this tool's own migration
-            # commit: "migra el gate de idioma al paquete darnlang" carries no accent and none of
-            # the dictionary's function words, so layers 1+2 pass it -- and a commit subject is
-            # short by nature, which is the case a stopword list cannot cover. Judged as ONE text
-            # rather than line by line, because a subject alone is often too short to classify.
+            # The cheap layers are weakest exactly here -- a commit subject is short by nature,
+            # which is the case a stopword list cannot cover -- so layer 3 earns its place on a
+            # message WITH A BODY, an issue, or a PR description.
+            #
+            # ⚠️ IT IS NOT RELIABLE ON A BARE SUBJECT LINE, and that is measured, not suspected:
+            #
+            #   "hooks: apply darnlang to darnlang"        -> tl (0.86)   English, FLAGGED
+            #   "ci: uv venv --clear, setup-uv makes one"  -> et (0.71)   English, FLAGGED
+            #   "migra el gate de idioma al paquete"       -> ca (0.86)   Spanish, caught
+            #
+            # A subject line is mostly identifiers, and two repetitions of an invented word dominate
+            # it. Neither confidence nor length nor word count separates the two sets -- the false
+            # positives score exactly as high as the true ones. So `--strict` belongs on prose, and
+            # a wiring that feeds it bare subjects will block honest English. See README §Detection.
             try:
                 hits = _strict_prose(text, args.git_comments)
             except StrictUnavailable as exc:

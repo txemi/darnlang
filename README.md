@@ -115,7 +115,19 @@ Three layers, cheapest first:
 1. **accented characters and inverted punctuation** — free, never wrong on its own;
 2. **a wordlist of function words that are not also English words** — free; drop a
    `darnlang-words.txt` in the repo to replace it;
-3. **`langdetect` over each prose line** — `--strict`, and it needs the `strict` extra.
+3. **`langdetect` over the whole text** — `prose --strict`, and it needs the `strict` extra.
+
+⚠️ **Layer 3 needs PROSE. Do not feed it a bare commit subject.** Measured: `hooks: apply darnlang
+to darnlang` is classified Tagalog with 0.86 confidence, and `ci: uv venv --clear, setup-uv makes
+one` Estonian with 0.71 — both perfectly English. A subject line is mostly identifiers, and two
+repetitions of an invented word dominate it. Neither confidence, nor length, nor word count
+separates those from real findings, which score exactly as high. Use `--strict` on an issue, a PR
+description, or a message **with a body**; on a subject alone it will block honest English, and a
+gate that does that is a gate people route around.
+
+There is no `check --strict` for the same reason, one step further: on a tree it produced 11
+findings against this repo's own English source, at least 8 of them plainly English. langdetect
+classifies a sentence; a line of a document is a fragment.
 
 Layer 1 alone is the usual approach, and it is why the usual approach misses: about a third of the
 Spanish in the repos this was built for carries no accent at all. Layer 2 is what catches that

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# darnlang, applied to darnlang — the lines this commit ADDS.
+#
+# The tool ships `.pre-commit-hooks.yaml` for its consumers and, until now, ran nothing locally on
+# itself: its own gate lived only in CI. That is the shape of defect this project keeps finding in
+# other people's repos, so leaving it here would have been the loudest possible example of it.
+#
+# Runs from the WORKING TREE, not a pinned release: a hook that gates this repo with an older
+# published version would let a regression through on the exact commit that introduces it, and
+# would not exercise the code being changed. `uv run` resolves the local package.
+#
+# Fails OPEN without uv, like every sibling repo's fragment: on an unprovisioned machine the local
+# gates are a no-op and CI is the real wall. A clean commit does NOT prove the gate ran.
+#
+# Activate: git config core.hooksPath hooks    Bypass: git commit --no-verify
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+command -v uv >/dev/null 2>&1 || { echo "darnlang pre-commit: uv not on PATH -> SKIPPING." >&2; exit 0; }
+
+# `--show-text` locally: the reader is you, and being told a line is wrong without being shown the
+# words is a gate you argue with instead of fix. CI keeps it off, because its logs are public.
+exec uv run --quiet darnlang check --diff --ext .py,.md --show-text

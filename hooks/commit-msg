@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# darnlang, applied to its own COMMIT MESSAGE.
+#
+# NO `--strict`, and the reason is measured rather than assumed. Layer 3 was enabled here first and
+# its very first real message -- "hooks: apply darnlang to darnlang", perfectly English -- came back
+# as a finding, classified Tagalog at 0.86 confidence. A subject line is mostly identifiers, and two
+# repetitions of an invented word dominate it. Neither confidence nor length nor word count
+# separates that from a real Spanish subject, which scores exactly as high.
+#
+# So the gap layer 3 was meant to close here -- a short subject with no accent and none of the
+# stopwords -- stays open, and saying so is better than a compensating control that does not work.
+# `--strict` belongs on prose: an issue, a PR description, a message with a body.
+#
+# Fails OPEN without uv. Bypass: git commit --no-verify
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+command -v uv >/dev/null 2>&1 || { echo "darnlang commit-msg: uv not on PATH -> SKIPPING." >&2; exit 0; }
+
+# Resolve first, judge second: a runner failure and a finding must not share an exit code. If the
+# environment is not there, skip rather than block — see the header.
+if ! uv run --quiet darnlang --help >/dev/null 2>&1; then
+  echo "darnlang commit-msg: could not run darnlang from the working tree -> SKIPPING." >&2
+  exit 0
+fi
+
+exec uv run --quiet darnlang prose "$1" --git-comments --show-text --label "commit message"
