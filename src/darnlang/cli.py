@@ -22,6 +22,7 @@ from . import baseline as bl
 from .detect import (CODE_EXTS, DEFAULT_ALLOWED, DOC_EXTS, ESCAPE, build_pattern,
                      langdetect_is_foreign, strip_verbatim)
 from .project import baseline_path, project_root
+from .detect import is_fence
 from .scan import Hit, NothingToScan, scan_diff, scan_prose, scan_tree
 
 DEFAULT_EXTS = (".py",)
@@ -79,13 +80,24 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--baseline-file", help="explicit baseline location")
     p.add_argument("--show-text", action="store_true", help="print the offending line (local use)")
     p.add_argument("--no-filenames", action="store_true", help="do not judge file NAMES")
-    p.add_argument("--strict", action="store_true",
-                   help="also run langdetect on every prose line (needs the 'strict' extra)")
+    p.add_argument("--allow-narrower", action="store_true",
+                   help="with update-baseline: permit writing a baseline that covers LESS")
+
+
+class _ArgParser(argparse.ArgumentParser):
+    """argparse exits 2 on a usage error, and 2 is taken: it means "coverage changed, re-seed". A
+    caller automating that would re-seed its baseline over a typo'd flag. Usage errors are 3, with
+    every other "could not run"."""
+
+    def error(self, message: str):  # noqa: D102
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        raise SystemExit(3)
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="darnlang",
-                                 description="Keep a repo's prose in one language, with a ratchet.")
+    ap = _ArgParser(prog="darnlang",
+                    description="Keep a repo's prose in one language, with a ratchet.")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     c = sub.add_parser("check", help="whole tree vs the baseline, or only the lines a diff adds")
@@ -144,7 +156,11 @@ def main(argv: list[str] | None = None) -> int:
     bpath = baseline_path(root, args.baseline_file)
 
     if getattr(args, "diff", None) is not None:
-        hits = scan_diff(root, args.diff or None, exts, pattern)
+        try:
+            hits = scan_diff(root, args.diff or None, exts, pattern)
+        except NothingToScan as exc:
+            print(f"darnlang: {exc}", file=sys.stderr)
+            return 3
         if hits:
             _report(hits, f"darnlang: {len(hits)} NEW line(s) in the wrong language:", args.show_text)
             return 1
@@ -159,18 +175,24 @@ def main(argv: list[str] | None = None) -> int:
         # becomes a floor of 0 that then passes forever.
         print(f"darnlang: {exc}", file=sys.stderr)
         return 3
-    if args.strict:
-        try:
-            hits = _add_langdetect(root, exts, hits)
-        except StrictUnavailable as exc:
-            print(f"darnlang: {exc}", file=sys.stderr)
-            return 3
     per_file: dict[str, int] = {}
     for h in hits:
         per_file[h.path] = per_file.get(h.path, 0) + 1
     n = len(hits)
 
     if args.cmd == "update-baseline":
+        # THE ONE COMMAND THAT WRITES THE FLOOR had no coverage guard, so narrowing the scope was
+        # silently baked in — and the per-file map wiped with it. `check` was loud about exactly the
+        # same narrowing. A ratchet whose write path is laxer than its read path is not a ratchet.
+        prev = bl.load(bpath)
+        if prev is not None:
+            changed = bl.coverage_changed(prev, list(exts))
+            if changed and changed[1] and not args.allow_narrower:
+                print(f"darnlang: refusing to write a NARROWER baseline. It would stop counting "
+                      f"{', '.join(changed[1])}, and bake that reduction in as the new floor.",
+                      file=sys.stderr)
+                print("If you mean it, say so: --allow-narrower.", file=sys.stderr)
+                return 2
         bl.save(bpath, n, list(exts), per_file)
         print(f"darnlang: baseline updated to {n} across {len(per_file)} file(s) "
               f"(covering {', '.join(exts)}).")
@@ -194,8 +216,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  NO LONGER judged: {', '.join(lost)} -- coverage went DOWN, which is what the "
                   f"ratchet exists to prevent. Do not accept this without knowing why.",
                   file=sys.stderr)
-        print("\nThis is an ADOPTION, not a regression: re-seed once with `darnlang "
-              "update-baseline` and the number may only fall from there.", file=sys.stderr)
+        if lost:
+            # Do NOT tell somebody to re-seed here. The previous wording gave identical advice for a
+            # gain and for a loss, so a reader who correctly took "do not accept this without
+            # knowing why" seriously was told in the next sentence to run the command that accepts
+            # it.
+            print("\nRestore the missing extensions, or, if the reduction is deliberate, write it "
+                  "down explicitly: `darnlang update-baseline --ext … --allow-narrower`.",
+                  file=sys.stderr)
+        else:
+            print("\nThis is an ADOPTION, not a regression: re-seed once with `darnlang "
+                  "update-baseline` and the number may only fall from there.", file=sys.stderr)
         return 2
 
     if n > base.count:
@@ -232,9 +263,21 @@ def _strict_prose(text: str, git_comments: bool) -> list[Hit]:
         raise StrictUnavailable(
             "--strict needs the 'strict' extra (pip install 'darnlang[strict]')."
         ) from exc
-    kept = []
+    # The SAME exemptions `scan_prose` applies. Layer 3 honoured none of them, and each omission was
+    # a measured defect: `--git-comments` dropped the scissors LINE but kept the diff below it, so
+    # 40 lines of English diff diluted a Spanish subject past langdetect (rc=0) -- and the shipped
+    # commit-msg hook is fed exactly that file whenever `commit.verbose` is on. The mirror case blamed
+    # an author for code. And `lang-ok` did not work, while the error message recommended it.
+    kept, in_fence = [], False
     for ln in text.splitlines():
+        if git_comments and ln.startswith("# ------------------------ >8"):
+            break
         if git_comments and ln.startswith("#"):
+            continue
+        if is_fence(ln):
+            in_fence = not in_fence
+            continue
+        if in_fence or ESCAPE in ln:
             continue
         kept.append(strip_verbatim(ln))
     body = " ".join(l.strip() for l in kept if l.strip())
@@ -243,50 +286,21 @@ def _strict_prose(text: str, git_comments: bool) -> list[Hit]:
     return []
 
 
-def _add_langdetect(root: str, exts: tuple[str, ...], hits: list[Hit]) -> list[Hit]:
-    """Layer 3, opt-in. Never replaces the cheap layers; only adds what they missed.
-
-    Raises StrictUnavailable rather than warning and carrying on. Warning was the first design and
-    it was wrong for the same reason as everything else in this file's history: a caller who asked
-    for the deep layer, did not get it, and saw a green exit has been told the tree is clean by a
-    check that never ran. Verified before changing it — layers 1+2 return 0 on unaccented prose
-    carrying none of the dictionary words, and layer 3 returns 1 on the same file — so the
-    difference between "ran" and "skipped" is a real verdict, not a formality.
-    """
-    try:
-        import langdetect  # noqa: F401,PLC0415
-    except ImportError as exc:
-        raise StrictUnavailable(
-            "--strict needs the 'strict' extra (pip install 'darnlang[strict]'). Refusing to "
-            "report a verdict you did not ask for: rerun without --strict to accept layers 1+2."
-        ) from exc
-    from .detect import family, is_fence, is_prose
-    from .scan import _files
-
-    seen = {(h.path, h.line) for h in hits}
-    extra: list[Hit] = []
-    for rel in _files(root, tracked_only=True):
-        if exts and not rel.lower().endswith(exts):
-            continue
-        try:
-            with open(os.path.join(root, rel), encoding="utf-8") as fh:
-                lines = fh.read().splitlines()
-        except (OSError, UnicodeDecodeError):
-            continue
-        in_fence = False
-        for i, ln in enumerate(lines, 1):
-            if family(rel) == "doc" and is_fence(ln):
-                in_fence = not in_fence
-                continue
-            if (rel, i) in seen or ESCAPE in ln or not is_prose(rel, ln, in_fence):
-                continue
-            s = ln.strip()
-            # Short strings are where langdetect is worst; below ~25 chars it guesses. The cheap
-            # layers already cover short prose via the wordlist, so this floor costs nothing.
-            if len(s) >= 25 and langdetect_is_foreign(s):
-                extra.append(Hit(rel, i, s, code="langdetect"))
-    return hits + extra
-
+# WHY THERE IS NO `check --strict`. Layer 3 existed here and was removed after measuring it against
+# this repo's own tree, which is English by construction and pins its baseline at 0: it produced
+# ELEVEN findings, at least eight of them plainly English —
+#
+#   "green and its tree at zero:"        "| PR descriptions | 7 more | no |"
+#   "[GPL-3.0-or-later](LICENSE)."       "module exists to prevent."
+#
+# and reported them with "translate them; do NOT raise the baseline". The cause is not fixable by
+# tuning: langdetect classifies a SENTENCE, and a line of a document is a fragment. Judging line by
+# line asks it a question it cannot answer, and a gate that fires on English is a gate that gets
+# bypassed — this project's oldest rule.
+#
+# `prose --strict` survives because there the unit is right: a commit message or a PR body is judged
+# as ONE text, which is a thing langdetect can classify. Measured on 338 real commit subjects, it
+# takes detection from ~76% to ~99.4%.
 
 if __name__ == "__main__":
     raise SystemExit(main())

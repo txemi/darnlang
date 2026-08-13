@@ -4,6 +4,66 @@ All notable changes to darnlang are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — 2026-08-13
+
+Everything here comes from two adversarial reviews that were told to break the tool rather than
+confirm it. They found **four false GREENs**, three of them in `scan_diff` — the function the shipped
+pre-commit hook runs, and the only public function in the package with **zero tests**. A mutation
+that made it judge just the first added line per file left the whole suite green.
+
+### Fixed — the false greens
+
+- **A file whose NAME is not ASCII was invisible to `--diff`.** git renders such a path as an escaped
+  C string, so the `+++ b/…` header did not match and every added line in that file was skipped.
+  `_files` had learned this; `scan_diff` had not. The file most likely to be *named* in the wrong
+  language is the file most likely to contain it.
+- **A diff that could not be read reported "OK — nothing new", exit 0.** The tree path invented
+  `NothingToScan` for exactly this; the diff path had not applied the doctrine — in the one place
+  the pre-commit hook runs. Now exit 3.
+- **Content that looks like a diff header hijacked the parser.** A line reading `++ b/vendor/x.txt`
+  inside a document is emitted as `+++ b/…` in the diff; treating it as a header redirected every
+  following line to a file that was not being edited, and dropped them. Any repo documenting a patch
+  format carries this, and it is attacker-reachable in a pull request.
+- **An unreadable or undecodable file was skipped in total silence.** `NothingToScan`'s twin: the
+  file list was not empty, but the element failed to open. The profile that hits it — legacy files in
+  latin-1 — is exactly the profile the ratchet exists for, so the silence would have written a floor
+  of 0 over real debt. They are now counted and named.
+- **One unbalanced — or merely inline — fence blinded the rest of a document.** ```` ```x``` is the
+  marker ```` is ordinary Markdown, and toggling on it hid everything after. Fence state is now
+  resolved over the whole file, and an unclosed fence closes nothing.
+
+### Fixed — the ratchet
+
+- **`update-baseline` had no coverage guard**, so narrowing the scope silently baked the reduction
+  in and wiped the per-file map — while `check` was loud about the identical narrowing. Now exit 2,
+  with `--allow-narrower` to say you mean it.
+- **The coverage message gave the same advice for a gain and a loss.** A reader who took "do not
+  accept this without knowing why" seriously was told in the next sentence to run the command that
+  accepts it.
+- **Exit 2 was overloaded**: argparse returns 2 for a usage error, and 2 means "coverage changed,
+  re-seed". A wrapper automating that would re-seed over a typo. Usage errors are 3.
+
+### Removed
+
+- **`check --strict`.** Measured against this repo's own tree — English by construction, baseline
+  pinned at 0 — layer 3 produced **11 findings, at least 8 plainly English**, and reported them with
+  "translate them". Not tunable: langdetect classifies a sentence, and a line of a document is a
+  fragment. `prose --strict` stays, because there the unit is right — a message is judged as one
+  text, which takes detection from ~76% to ~99.4% on 338 real commit subjects.
+- `prose --strict` also now honours the scissors line, fences and `lang-ok`, which it ignored. With
+  `commit.verbose` on, 40 lines of English diff diluted a Spanish subject past detection — and the
+  shipped commit-msg hook is fed exactly that file.
+
+### Testing
+
+- **`scan_diff` has tests at all**, including every case above.
+- Fence handling is tested through `scan_tree` rather than by passing `in_fence` in by hand.
+- The **shrinking** direction of `coverage_changed` is tested — the direction the code calls "how a
+  gate loosens without anyone noticing" was the one a refactor could delete for free.
+- `langdetect` moved into the `dev` extra, because CI installed `.[dev]` and therefore **skipped
+  every layer-3 test**: the feature 0.2.0 was released for was never exercised by the gate guarding
+  merges. A second CI job installs without it, to cover the other half.
+
 ## [0.2.0] — 2026-08-13
 
 ### Fixed

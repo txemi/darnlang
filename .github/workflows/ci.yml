@@ -27,6 +27,26 @@ jobs:
       - run: uv pip install -e ".[dev]"
       - run: uv run pytest -q
 
+  # Layer 3 has two behaviours and they need two environments: WITH langdetect it must catch what
+  # the cheap layers miss, WITHOUT it `--strict` must refuse rather than report clean. `[dev]` now
+  # carries langdetect, so this job covers the other half — the half where the 0.1.0 regression
+  # lived.
+  no-strict-extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --clear
+      - run: uv pip install -e . pytest        # deliberately NOT .[dev]
+      - run: uv run pytest -q
+      - name: --strict must refuse without the extra, never report clean
+        run: |
+          set +e
+          uv run darnlang prose README.md --strict
+          rc=$?
+          set -e
+          [ "$rc" = "3" ] || { echo "expected rc=3, got $rc"; exit 1; }
+
   # Every YAML this repo SHIPS must parse. `action.yml` shipped broken through two tags -- an
   # unquoted `": "` inside a description -- and nothing noticed, because the only thing that would
   # have loaded it is a consumer, and this repo's own CI reinvented the action's three steps by hand

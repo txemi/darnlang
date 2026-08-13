@@ -30,14 +30,56 @@ class Hit:
 
 
 def _scan_lines(rel: str, lines: list[str], pattern) -> list[Hit]:
-    hits, in_fence = [], False
+    """Offending lines of one file, tracking fenced blocks for documents.
+
+    Fence state is resolved by `fenced_line_numbers`, which refuses to trust an UNBALANCED fence.
+    Toggling naively cost two measured blind spots: a document with an odd number of fences hid
+    everything after the last one, and — with no typo needed — a line beginning with an inline span
+    (```` ```x``` is the marker ````) toggled the state and swallowed the rest of the file. Both
+    reported a clean scan.
+    """
+    hits = []
+    fenced = fenced_line_numbers(lines) if family(rel) == "doc" else set()
     for i, ln in enumerate(lines, 1):
-        if family(rel) == "doc" and is_fence(ln):
-            in_fence = not in_fence
+        if i in fenced:
             continue
-        if offending(ln, rel, pattern, in_fence):
+        if offending(ln, rel, pattern, i in fenced):
             hits.append(Hit(rel, i, ln.strip()))
     return hits
+
+
+def fenced_line_numbers(lines: list[str]) -> set[int]:
+    """Line numbers inside a fenced code block, fences included.
+
+    Two rules that a naive toggle does not have, both from measured false greens:
+
+    * a fence OPENER must be a lone fence on its line. ```` ```x``` is the marker ```` is an inline
+      code span in ordinary Markdown, not the start of a block, and treating it as one hid every
+      following line of the document.
+    * an UNBALANCED fence closes nothing. If a block is opened and never closed, the file is treated
+      as having no block at all rather than as being entirely code — because "the author forgot a
+      fence" must not be a way to make a whole document unjudgeable. It errs toward MORE findings,
+      which is the direction a gate should be wrong in.
+    """
+    opens: list[int] = []
+    spans: list[tuple[int, int]] = []
+    for i, ln in enumerate(lines, 1):
+        s = ln.strip()
+        if not (s.startswith("```") or s.startswith("~~~")):
+            continue
+        marker = s[:3]
+        # A closing fence carries nothing but the marker; an opener may carry an info string. A line
+        # that OPENS and CLOSES on itself (```x```) is an inline span and neither.
+        if s.count(marker) > 1:
+            continue
+        if opens:
+            spans.append((opens.pop(), i))
+        else:
+            opens.append(i)
+    fenced: set[int] = set()
+    for start, end in spans:
+        fenced.update(range(start, end + 1))
+    return fenced
 
 
 class NothingToScan(Exception):
@@ -75,15 +117,29 @@ def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = Tr
             f"none of the {len(files)} files under {root} match {', '.join(exts)}. "
             f"Widen --ext, or you are measuring nothing.")
     hits: list[Hit] = []
+    unread: list[str] = []
     for rel in files:
         if exts and not rel.lower().endswith(exts):
             continue
         try:
             with open(os.path.join(root, rel), encoding="utf-8") as fh:
                 lines = fh.read().splitlines()
-        except (OSError, UnicodeDecodeError):
+        except (OSError, UnicodeDecodeError) as exc:
+            # SAY IT. A bare `continue` here was NothingToScan's twin: the list was not empty, but
+            # every element in it failed to open, and the tool reported a clean tree. The profile
+            # that hits this is exactly the profile the ratchet exists for — a repo that adopted the
+            # rule late, whose legacy files are latin-1 — so the silence would have written a floor
+            # of 0 over real debt. `chmod 000` and a vendored gitlink do the same.
+            unread.append(f"{rel} ({exc.__class__.__name__})")
             continue
         hits.extend(_scan_lines(rel, lines, pattern))
+    if unread:
+        print(f"darnlang: {len(unread)} file(s) could NOT be read and were not judged "
+              f"(this is not the same as clean):", file=sys.stderr)
+        for u in unread[:10]:
+            print(f"  {u}", file=sys.stderr)
+        if len(unread) > 10:
+            print(f"  ... and {len(unread) - 10} more", file=sys.stderr)
     if filenames:
         hits.extend(_scan_filenames(root, pattern, tracked_only))
     return hits
@@ -143,22 +199,38 @@ def scan_diff(root: str, ref: str | None, exts: tuple[str, ...], pattern) -> lis
     read fails the line is judged as prose, which errs toward MORE findings. That is the correct
     direction for a gate to be wrong in.
     """
-    cmd = ["git", "-C", root, "diff", "--unified=0"] + ([ref] if ref else ["--cached"])
+    # `core.quotePath=false`: without it git RENDERS a non-ASCII path as an escaped C string, so the
+    # `+++ b/…` line does not match and EVERY added line in that file is skipped. `_files` learned
+    # this and this function did not — and the file most likely to be NAMED in the wrong language is
+    # the file most likely to contain it. `-z` is not usable here: a unified diff is line-oriented.
+    cmd = ["git", "-c", "core.quotePath=false", "-C", root, "diff", "--unified=0"]
+    cmd += [ref] if ref else ["--cached"]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120).stdout
     except (OSError, subprocess.SubprocessError) as exc:
-        print(f"darnlang: cannot read the diff ({exc.__class__.__name__}) -> nothing judged",
-              file=sys.stderr)
-        return []
-    hits, path, lineno, fenced = [], None, 0, set()
+        # RAISE, never `return []`. An empty finding list is indistinguishable from a clean diff, so
+        # "I could not look" was being reported as "I found nothing" — in the one place this tool
+        # had not applied its own doctrine, and the place the shipped pre-commit hook runs.
+        raise NothingToScan(
+            f"cannot read the diff ({exc.__class__.__name__}). A diff that could not be read is not "
+            f"a clean diff.") from exc
+    hits, path, lineno, fenced, in_hunk = [], None, 0, set(), False
     for ln in out.splitlines():
-        if ln.startswith("+++ b/"):
+        # `+++ b/…` is only a header OUTSIDE a hunk. Inside one it is an ADDED LINE whose content
+        # begins with `++ b/…` — which any file documenting a patch format contains. Treating it as
+        # a header silently redirected every following line to a path that was not being edited, and
+        # dropped them all when that path failed the extension filter. Attacker-reachable in a PR.
+        if not in_hunk and ln.startswith("+++ b/"):
             path = ln[6:]
             fenced = _fenced_lines(os.path.join(root, path)) if family(path) == "doc" else set()
             continue
         m = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)", ln)
         if m:
             lineno = int(m.group(1))
+            in_hunk = True
+            continue
+        if ln.startswith("diff --git "):
+            in_hunk, path = False, None
             continue
         if ln.startswith("+") and not ln.startswith("+++"):
             body = ln[1:]
@@ -170,18 +242,17 @@ def scan_diff(root: str, ref: str | None, exts: tuple[str, ...], pattern) -> lis
 
 
 def _fenced_lines(path: str) -> set[int]:
-    inside, fenced = False, set()
+    """Fence state for a doc file in a diff, from the post-image on disk.
+
+    Shares `fenced_line_numbers` with the tree scan on purpose: two implementations of "is this line
+    inside a fence" is two answers, and the pre-commit path disagreeing with the CI path is how a
+    contributor learns the gate is arbitrary.
+    """
     try:
         with open(path, encoding="utf-8") as fh:
-            for n, ln in enumerate(fh.read().splitlines(), 1):
-                if is_fence(ln):
-                    inside = not inside
-                    fenced.add(n)
-                elif inside:
-                    fenced.add(n)
+            return fenced_line_numbers(fh.read().splitlines())
     except (OSError, UnicodeDecodeError):
         return set()
-    return fenced
 
 
 def scan_prose(text: str, pattern, *, git_comments: bool = False) -> list[Hit]:

@@ -251,12 +251,21 @@ def _has_langdetect() -> bool:
 def test_layer_three_catches_what_the_cheap_layers_cannot(tmp_path):
     """The justification for the extra, measured rather than assumed: prose with no accents and none
     of the dictionary's function words is invisible to layers 1 and 2."""
-    repo = _repo(tmp_path / "repo", {
-        "a.py": "# This comment is perfectly ordinary English and must never be flagged.\n",
-        "b.md": "Compilamos el proyecto usando herramientas modernas y guardamos resultados.\n"})
-    assert _run(["update-baseline", "--ext", ".py,.md"], repo) == 0   # layers 1+2 see nothing
-    assert _run(["check", "--ext", ".py,.md"], repo) == 0
-    assert _run(["check", "--ext", ".py,.md", "--strict"], repo) == 1  # layer 3 sees it
+    msg = tmp_path / "m.txt"
+    msg.write_text("Compilamos el proyecto usando herramientas modernas y guardamos resultados.\n",
+                   encoding="utf-8")
+    assert _run(["prose", str(msg)], tmp_path) == 0             # layers 1+2 see nothing
+    assert _run(["prose", str(msg), "--strict"], tmp_path) == 1  # layer 3 sees it
+
+
+def test_there_is_no_tree_level_strict(tmp_path):
+    """Removed after measuring 11 findings on this repo's own English tree, 8 of them plainly
+    English. langdetect classifies a SENTENCE; a line of a document is a fragment. Pinned so nobody
+    reintroduces it as an obvious-looking feature."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    assert _run(["update-baseline"], repo) == 0
+    with pytest.raises(SystemExit):        # argparse rejects the flag
+        _run(["check", "--strict"], repo)
 
 
 @pytest.mark.skipif(_has_langdetect(), reason="only meaningful without the extra")
@@ -293,3 +302,132 @@ def test_strict_prose_does_not_fire_on_english():
             fh.write(text)
             path = fh.name
         assert main(["prose", path, "--strict"]) == 0, text
+
+
+# --- scan_diff: the path the pre-commit hook runs, and the one that had no tests --------------
+#
+# Three of the four false GREENs found in the first adversarial review lived here, in the only
+# public function of the package with zero coverage. A mutation that made it judge just the first
+# added line per file left the whole suite green.
+
+def _staged(tmp_path, files: dict[str, str], *, seed: str = "# english seed\n"):
+    repo = _repo(tmp_path / "repo", {"seed.py": seed})
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "seed"],
+                   cwd=repo, check=True)
+    for rel, body in files.items():
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(body, encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    return repo
+
+
+SPANISH_LINE = "# esto es prosa que no deberia estar aqui para nada\n"
+
+
+def test_diff_sees_a_file_whose_NAME_is_not_ascii(tmp_path):
+    """git renders a non-ASCII path as an escaped C string, so the `+++ b/…` header did not match
+    and every added line in that file was skipped. The file most likely to be NAMED in the wrong
+    language is the file most likely to contain it."""
+    repo = _staged(tmp_path, {"análisis.py": SPANISH_LINE})
+    assert _run(["check", "--diff"], repo) == 1
+
+
+def test_a_diff_that_cannot_be_read_is_an_error_not_a_clean_diff(tmp_path):
+    """It used to print "cannot read the diff -> nothing judged" and then "OK -- nothing new",
+    exit 0. The tree path invented NothingToScan for exactly this; the diff path had not applied
+    the doctrine — in the one place the shipped pre-commit hook runs."""
+    repo = _staged(tmp_path, {"a.py": SPANISH_LINE})
+    assert _run(["check", "--diff", "v9.9.9-does-not-exist"], repo) == 3
+
+
+def test_content_that_looks_like_a_diff_header_does_not_hijack_the_parser(tmp_path):
+    """A line reading `++ b/vendor/thing.txt` inside a document is emitted as `+++ b/…` in the
+    unified diff. Treating it as a header redirected every following line to a path that was not
+    being edited, and dropped them all. Any repo documenting a patch format carries this."""
+    repo = _staged(tmp_path, {"doc.md": ("Documenting a patch format below.\n"
+                                         "++ b/vendor/thing.txt\n"
+                                         "Esta linea deberia dar un hallazgo para todos.\n")})
+    assert _run(["check", "--diff", "--ext", ".md"], repo) == 1
+
+
+def test_diff_judges_every_added_line_not_just_the_first(tmp_path):
+    """The mutation that survived the whole suite."""
+    repo = _staged(tmp_path, {"a.py": "# english first line\n" + SPANISH_LINE})
+    from darnlang.scan import scan_diff
+    hits = scan_diff(str(repo), None, (".py",), DEFAULT_PATTERN)
+    assert len(hits) == 1 and hits[0].line == 2
+
+
+def test_diff_reports_the_right_file_when_several_change(tmp_path):
+    """With an ASCII file earlier in the diff, a mis-parsed header blamed the PREVIOUS file — a
+    user who opens that line, finds clean English and concludes the tool lies is one step from
+    --no-verify."""
+    repo = _staged(tmp_path, {"aaa.py": "# plain english comment here\n", "zzz.py": SPANISH_LINE})
+    from darnlang.scan import scan_diff
+    hits = scan_diff(str(repo), None, (".py",), DEFAULT_PATTERN)
+    assert [h.path for h in hits] == ["zzz.py"]
+
+
+# --- fences, at integration level ---------------------------------------------------------------
+
+def test_an_unbalanced_fence_does_not_swallow_the_document(tmp_path):
+    """An odd number of fences used to make everything after the last one invisible: "the author
+    forgot a fence" must not be a way to make a document unjudgeable."""
+    repo = _repo(tmp_path / "repo", {"doc.md": ("Intro in English.\n\n```\ncode\n\n"
+                                                "Esta linea deberia dar un hallazgo para todos.\n")})
+    assert _run(["update-baseline", "--ext", ".md"], repo) == 0
+    import json
+    assert json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))["count"] == 1
+
+
+def test_an_inline_code_span_at_the_start_of_a_line_is_not_a_fence(tmp_path):
+    """No typo needed: ```` ```x``` is the marker ```` is ordinary Markdown, and toggling on it hid
+    the rest of the file."""
+    repo = _repo(tmp_path / "repo", {"doc.md": ("Intro in English.\n\n```x``` is the marker.\n"
+                                                "Esta linea deberia dar un hallazgo para todos.\n")})
+    assert _run(["update-baseline", "--ext", ".md"], repo) == 0
+    import json
+    assert json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))["count"] == 1
+
+
+def test_a_real_fenced_block_is_still_exempt(tmp_path):
+    repo = _repo(tmp_path / "repo", {"doc.md": ("Intro in English.\n\n```\n"
+                                                "Esta linea va dentro del bloque y no cuenta.\n"  # lang-ok
+                                                "```\n\nOutro in English.\n")})
+    assert _run(["update-baseline", "--ext", ".md"], repo) == 0
+    import json
+    assert json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))["count"] == 0
+
+
+# --- a file that could not be read is not a file that was clean ---------------------------------
+
+def test_an_undecodable_file_is_reported_not_silently_skipped(tmp_path, capfd):
+    """NothingToScan's twin: the list was not empty, but the element failed to open. The profile
+    that hits this — legacy files in latin-1 — is exactly the profile the ratchet exists for, so the
+    silence would have written a floor of 0 over real debt."""
+    repo = _repo(tmp_path / "repo", {"ok.py": "# english\n"})
+    (repo / "legacy.py").write_bytes("# esta funcion calcula el numero de años\n".encode("latin-1"))
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    assert _run(["update-baseline"], repo) == 0
+    err = capfd.readouterr().err
+    assert "could NOT be read" in err and "legacy.py" in err
+
+
+# --- coverage: the direction that was never tested ----------------------------------------------
+
+def test_coverage_going_DOWN_is_reported_and_fails(tmp_path):
+    """`baseline.py` calls a shrinking coverage "how a gate loosens without anyone noticing", and
+    only the growing direction had a test — so the one that matters could be deleted for free."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n", "DOC.md": "English doc.\n"})
+    assert _run(["update-baseline", "--ext", ".py,.md"], repo) == 0
+    r = _run(["check", "--ext", ".py"], repo)
+    assert r == 2
+
+
+def test_update_baseline_refuses_to_bake_in_a_coverage_reduction(tmp_path):
+    """The one command that WRITES the floor had no coverage guard at all, so a narrowed scope was
+    silently baked in — and the per-file map wiped with it."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n", "DOC.md": "English doc.\n"})
+    assert _run(["update-baseline", "--ext", ".py,.md"], repo) == 0
+    assert _run(["update-baseline", "--ext", ".py"], repo) == 2
