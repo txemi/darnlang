@@ -235,3 +235,34 @@ def test_a_repo_with_nothing_committed_is_an_error_not_a_clean_scan(tmp_path):
 def test_scanning_a_tree_where_no_file_matches_the_extensions_is_an_error(tmp_path):
     repo = _repo(tmp_path / "repo", {"README.md": "english only\n"})
     assert _run(["update-baseline", "--ext", ".py"], repo) == 3
+
+
+# --- layer 3, and refusing to answer when it cannot run -----------------------------------------
+
+def _has_langdetect() -> bool:
+    try:
+        import langdetect  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(not _has_langdetect(), reason="needs the 'strict' extra")
+def test_layer_three_catches_what_the_cheap_layers_cannot(tmp_path):
+    """The justification for the extra, measured rather than assumed: prose with no accents and none
+    of the dictionary's function words is invisible to layers 1 and 2."""
+    repo = _repo(tmp_path / "repo", {
+        "a.py": "# This comment is perfectly ordinary English and must never be flagged.\n",
+        "b.md": "Compilamos el proyecto usando herramientas modernas y guardamos resultados.\n"})
+    assert _run(["update-baseline", "--ext", ".py,.md"], repo) == 0   # layers 1+2 see nothing
+    assert _run(["check", "--ext", ".py,.md"], repo) == 0
+    assert _run(["check", "--ext", ".py,.md", "--strict"], repo) == 1  # layer 3 sees it
+
+
+@pytest.mark.skipif(_has_langdetect(), reason="only meaningful without the extra")
+def test_strict_without_the_extra_refuses_instead_of_reporting_clean(tmp_path):
+    """It used to warn and carry on, which means a caller who asked for the deep layer, did not get
+    it, and saw exit 0 was told the tree is clean by a check that never ran."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    assert _run(["update-baseline"], repo) == 0
+    assert _run(["check", "--strict"], repo) == 3

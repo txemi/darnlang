@@ -146,7 +146,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"darnlang: {exc}", file=sys.stderr)
         return 3
     if args.strict:
-        hits = _add_langdetect(root, exts, hits)
+        try:
+            hits = _add_langdetect(root, exts, hits)
+        except StrictUnavailable as exc:
+            print(f"darnlang: {exc}", file=sys.stderr)
+            return 3
     per_file: dict[str, int] = {}
     for h in hits:
         per_file[h.path] = per_file.get(h.path, 0) + 1
@@ -202,14 +206,27 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+class StrictUnavailable(Exception):
+    """`--strict` was asked for and layer 3 cannot run."""
+
+
 def _add_langdetect(root: str, exts: tuple[str, ...], hits: list[Hit]) -> list[Hit]:
-    """Layer 3, opt-in. Never replaces the cheap layers; only adds what they missed."""
+    """Layer 3, opt-in. Never replaces the cheap layers; only adds what they missed.
+
+    Raises StrictUnavailable rather than warning and carrying on. Warning was the first design and
+    it was wrong for the same reason as everything else in this file's history: a caller who asked
+    for the deep layer, did not get it, and saw a green exit has been told the tree is clean by a
+    check that never ran. Verified before changing it — layers 1+2 return 0 on unaccented prose
+    carrying none of the dictionary words, and layer 3 returns 1 on the same file — so the
+    difference between "ran" and "skipped" is a real verdict, not a formality.
+    """
     try:
         import langdetect  # noqa: F401,PLC0415
-    except ImportError:
-        print("darnlang: --strict needs the 'strict' extra (pip install darnlang[strict]) "
-              "-> skipping layer 3", file=sys.stderr)
-        return hits
+    except ImportError as exc:
+        raise StrictUnavailable(
+            "--strict needs the 'strict' extra (pip install 'darnlang[strict]'). Refusing to "
+            "report a verdict you did not ask for: rerun without --strict to accept layers 1+2."
+        ) from exc
     from .detect import family, is_fence, is_prose
     from .scan import _files
 

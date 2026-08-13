@@ -1,0 +1,46 @@
+# Publish to PyPI on a GitHub Release, via Trusted Publishing (OIDC).
+#
+# NO API TOKEN IS STORED ANYWHERE. PyPI verifies the workflow's OIDC identity — this repository,
+# this workflow file, this environment — and mints a short-lived credential for that one upload. A
+# stored token is a long-lived secret that leaks with the repo; this cannot be reused off-box.
+#
+# ONE MANUAL STEP, once, before the first release works: on pypi.org →
+# "Your projects" → "Publishing" → add a **pending publisher** with
+#   owner: txemi · repository: darnlang · workflow: publish.yml · environment: pypi
+# It cannot be automated: it is the human act that binds a name on PyPI to this repository, and
+# automating it would defeat what it is for.
+name: publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build sdist and wheel
+        run: uv build
+      # `twine check` before uploading, not after: a malformed README renders as raw text on the
+      # package page and cannot be fixed without burning a version number.
+      - name: Check the metadata renders
+        run: uvx twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # the whole point: mint the OIDC token, store no secret
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
