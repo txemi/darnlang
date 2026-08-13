@@ -21,12 +21,21 @@ the least retractable ones you have. An indexed pull-request title cannot be tak
 
 ## Install
 
+**Not on PyPI yet**, so install from git and pin the tag:
+
 ```bash
-uvx darnlang check              # no install
-pipx install darnlang           # or
-pip install darnlang
-pip install 'darnlang[strict]'  # + the optional deep-detection layer
+# no install at all
+uvx --from git+https://github.com/txemi/darnlang@v0.1.0 darnlang check
+
+# or properly
+pipx install git+https://github.com/txemi/darnlang@v0.1.0
+pip install 'darnlang[strict] @ git+https://github.com/txemi/darnlang@v0.1.0'   # + deep layer
 ```
+
+<sub>Once it is published the short forms — `uvx darnlang`, `pip install darnlang` — start working
+and this section shrinks. They are written out in full here rather than promised, because a README
+that documents an install command that does not work is the first thing a reader tries and the first
+way a tool loses their trust.</sub>
 
 Python 3.10+. **No runtime dependencies** in the default path — that is what lets it run first in a
 pre-commit hook that fires dozens of times a day, and what stops it degrading into a silent no-op on
