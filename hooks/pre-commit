@@ -20,4 +20,4 @@ command -v uv >/dev/null 2>&1 || { echo "darnlang pre-commit: uv not on PATH -> 
 
 # `--show-text` locally: the reader is you, and being told a line is wrong without being shown the
 # words is a gate you argue with instead of fix. CI keeps it off, because its logs are public.
-exec uv run --quiet darnlang check --diff --ext .py,.md --show-text
+exec uv run --quiet darnlang check --diff --ext all --show-text

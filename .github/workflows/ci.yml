@@ -103,4 +103,4 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - name: uvx from this commit
-        run: uvx --from . darnlang check --ext .py,.md
+        run: uvx --from . darnlang check --ext all
