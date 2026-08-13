@@ -21,7 +21,7 @@ import sys
 from . import baseline as bl
 from .detect import (CODE_EXTS, DEFAULT_ALLOWED, DOC_EXTS, ESCAPE, build_pattern,
                      langdetect_is_foreign, strip_verbatim)
-from .project import baseline_path, project_root
+from .project import ForeignBaseline, baseline_path, project_root
 from .detect import is_fence
 from .scan import Hit, NothingToScan, scan_diff, scan_prose, scan_tree
 
@@ -153,7 +153,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     exts = _exts(args.ext)
-    bpath = baseline_path(root, args.baseline_file)
+    try:
+        bpath = baseline_path(root, args.baseline_file)
+    except ForeignBaseline as exc:
+        print(f"darnlang: {exc}", file=sys.stderr)
+        return 3
 
     if getattr(args, "diff", None) is not None:
         try:

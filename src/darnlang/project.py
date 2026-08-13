@@ -51,14 +51,46 @@ def project_root(start: str | None = None) -> str:
     return start
 
 
+class ForeignBaseline(Exception):
+    """The explicit baseline belongs to a different project than the tree being scanned."""
+
+
 def baseline_path(root: str, explicit: str | None = None) -> str:
     """The baseline file, DERIVED from `root` so the two can never disagree.
 
-    Order: an explicit `--baseline-file` (you are declaring you accept writes there) -> the legacy
-    `tools/lang_gate_baseline.json` if it already exists -> `<root>/.darnlang-baseline.json`.
+    Order: an explicit `--baseline-file` -> the legacy `tools/lang_gate_baseline.json` if it already
+    exists -> `<root>/.darnlang-baseline.json`.
+
+    THE EXPLICIT OVERRIDE IS CONTAINED, and that guard is not decoration. This tool was extracted
+    from a script that resolved the tree and the baseline independently; the derivation fix removed
+    the accidental version of the bug, but `--baseline-file` reintroduces it BY DESIGN, since it is
+    the one place a caller can point at another project's numbers. The ancestor had this guard and
+    two tests for it, and both were deleted with the file. Without it, measured:
+
+        darnlang check --baseline-file /elsewhere/base.json
+        -> "OK -- and it went DOWN (0 < 1242). Lock the win in with `darnlang update-baseline`."
+
+    which is, word for word, the congratulation this project exists to make impossible — and the
+    suggested command then overwrites a real 1242 with a 0.
+
+    `DARNLANG_ALLOW_FOREIGN_BASELINE=1` is the escape, because a deliberate cross-tree comparison is
+    a legitimate thing to want and guessing on the caller's behalf is what got us here.
     """
     if explicit:
-        return os.path.realpath(explicit)
+        path = os.path.realpath(explicit)
+        if not os.environ.get("DARNLANG_ALLOW_FOREIGN_BASELINE"):
+            root_real = os.path.realpath(root)
+            try:
+                inside = os.path.commonpath([path, root_real]) == root_real
+            except ValueError:      # different drives on Windows
+                inside = False
+            if not inside:
+                raise ForeignBaseline(
+                    f"the baseline {path} is outside the tree being scanned ({root_real}). "
+                    f"Comparing a count from one project against another project's floor is how a "
+                    f"gate congratulates you on debt it never looked at. Set "
+                    f"DARNLANG_ALLOW_FOREIGN_BASELINE=1 if you mean it.")
+        return path
     legacy = os.path.join(root, LEGACY_BASELINE)
     if os.path.exists(legacy):
         return legacy

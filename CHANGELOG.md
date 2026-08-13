@@ -4,6 +4,27 @@ All notable changes to darnlang are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-08-13
+
+### Fixed
+- **`--baseline-file` had no containment check.** It is the one place a caller can point at another
+  project's numbers, so it is the one place the single-root derivation cannot help — and the
+  ancestor's guard for it was deleted along with the file it lived in. Measured before restoring it:
+  pointing at a foreign baseline of 1242 produced *"OK — and it went DOWN (0 < 1242). Lock the win
+  in with `darnlang update-baseline`"*, and that suggested command then overwrote the real 1242 with
+  a zero. Word for word the failure this tool was extracted to make impossible.
+
+  Now exit 3, with `DARNLANG_ALLOW_FOREIGN_BASELINE=1` to say you mean it — refusing with no way to
+  override is how a guard gets deleted a second time. Two tests, including that the other project's
+  file is left untouched.
+
+### Note for consumers wiring this in CI
+Resolve the tool in its **own step** (`uv tool install`), not inside the judging call. `uvx` exits
+**1** when it cannot resolve a ref — offline, moved tag, network policy — which is indistinguishable
+from *"found something"*. On an issue-labelling workflow that difference is a public accusation
+against a stranger whose only mistake was arriving while the runner could not reach a git tag.
+`examples/lang-issue.yml` and `examples/Jenkinsfile` do it the safe way.
+
 ## [0.3.0] — 2026-08-13
 
 Everything here comes from two adversarial reviews that were told to break the tool rather than

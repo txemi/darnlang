@@ -19,7 +19,7 @@ pipeline {
     // resolved at all, and uvx's failure is rc=1 -- which this pipeline's own case statement then
     // reports as "found lines in the wrong language". A pinned version that does not exist is worse
     // than a floating one, because it fails as the thing it was meant to detect.
-    DARNLANG = 'git+https://github.com/txemi/darnlang@v0.2.0'
+    DARNLANG = 'git+https://github.com/txemi/darnlang@v0.4.0'
     // Where `pip install --user` and uv put console scripts.
     PATH = "${env.HOME}/.local/bin:${env.PATH}"
   }

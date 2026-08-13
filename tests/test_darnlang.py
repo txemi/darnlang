@@ -432,3 +432,33 @@ def test_update_baseline_refuses_to_bake_in_a_coverage_reduction(tmp_path):
     repo = _repo(tmp_path / "repo", {"a.py": "# english\n", "DOC.md": "English doc.\n"})
     assert _run(["update-baseline", "--ext", ".py,.md"], repo) == 0
     assert _run(["update-baseline", "--ext", ".py"], repo) == 2
+
+
+# --- the explicit baseline override is contained -------------------------------------------------
+
+def test_a_baseline_outside_the_tree_is_refused(tmp_path):
+    """`--baseline-file` is the one place a caller can point at another project's numbers, so it is
+    the one place the single-root derivation cannot protect. The ancestor had this guard and two
+    tests for it; both were deleted with the file it lived in. Without it the tool answers
+    "it went DOWN (0 < 1242), lock the win in" — the exact congratulation it exists to prevent —
+    and the suggested command overwrites the real number with a zero."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    foreign = tmp_path / "elsewhere" / "base.json"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text(json.dumps({"count": 1242, "scanned_exts": [".py"], "files": {}}),
+                       encoding="utf-8")
+    assert _run(["check", "--baseline-file", str(foreign)], repo) == 3
+    assert _run(["update-baseline", "--baseline-file", str(foreign)], repo) == 3
+    # …and it did NOT overwrite the other project's numbers.
+    assert json.loads(foreign.read_text(encoding="utf-8"))["count"] == 1242
+
+
+def test_a_deliberate_cross_tree_comparison_is_still_possible(tmp_path, monkeypatch):
+    """Refusing is right; refusing with no way to say "I mean it" is how a guard gets deleted."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    foreign = tmp_path / "elsewhere" / "base.json"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text(json.dumps({"count": 0, "scanned_exts": [".py"], "files": {}}),
+                       encoding="utf-8")
+    monkeypatch.setenv("DARNLANG_ALLOW_FOREIGN_BASELINE", "1")
+    assert _run(["check", "--baseline-file", str(foreign)], repo) == 0

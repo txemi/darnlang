@@ -30,7 +30,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       # NOT `uv pip install --system`: a runner's interpreter is externally managed and that fails.
       # NOT the bare name either, until the package is on PyPI. Pin the ref you actually consume.
-      - run: uv tool install "git+https://github.com/txemi/darnlang@v0.2.0"
+      # A step of its OWN, on purpose: `uvx --from … darnlang …` in one call cannot tell "could not
+      # resolve" (uvx exits 1) from "found something" (darnlang exits 1) -- and on THIS workflow that
+      # difference is a public comment accusing a stranger.
+      - run: uv tool install "darnlang[strict] @ git+https://github.com/txemi/darnlang@v0.4.0"
       - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Judge the issue title and body
