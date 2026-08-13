@@ -19,6 +19,15 @@ on:
   issues:
     types: [opened, edited]
 
+# One run per issue at a time. `ALREADY` reads the labels as they were WHEN THE EVENT FIRED, and the
+# run takes ~15 s to write one, so editing a title and then a body -- two events seconds apart -- can
+# have both snapshots say "not labelled" and both post a comment. Serialising removes that window;
+# `cancel-in-progress: false` because the second event may carry the corrected text and must still
+# be judged.
+concurrency:
+  group: lang-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 permissions:
   # `contents: read` is NOT redundant. Declaring a `permissions:` block sets every scope you do not
   # list to `none`, so `actions/checkout` loses its read grant and dies with a 403 -- on PRIVATE
@@ -102,8 +111,12 @@ jobs:
           # removed by hand, a comment scrolls away, but the run stays attached to the event.
           exit 1
 
+      # `always()` matters here and nowhere else in this file: without it a broken check step skips
+      # BOTH follow-ups, and the removal is one of them. An issue translated on the day `uv` or the
+      # pin is broken keeps a `needs-english` nobody put there on purpose. Adding a label needs the
+      # check to have run; REMOVING one only needs it not to have found anything.
       - name: Clear the flag once it is translated
-        if: steps.check.outputs.english == 'true' && contains(github.event.issue.labels.*.name, 'needs-english')
+        if: always() && steps.check.outputs.english == 'true' && contains(github.event.issue.labels.*.name, 'needs-english')
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
