@@ -57,9 +57,29 @@ def _read_words(path: str | None) -> list[str] | None:
         return None
 
 
+def _autodetected(root: str) -> list[str] | None:
+    """A wordlist found by convention. It EXTENDS the built-in list; it does not replace it.
+
+    Replacing was the first design and it was a silent trap, found while wiring a repo that happens
+    to ship `scripts/devtools/spanish_words.txt`: the file was picked up automatically, swapped out
+    the built-in function words, and the gate stopped catching the commonest markers there are:
+    the Spanish articles and conjunctions. Nothing said so. A file discovered by NAME must never change the meaning of
+    the detector behind your back; only an explicit `--words-file` may, because that is a decision
+    somebody typed.
+    """
+    path = next((p for p in (os.path.join(root, n) for n in WORDS_FILENAMES)
+                 if os.path.exists(p)), None)
+    if not path:
+        return None
+    words = _read_words(path)
+    if words:
+        print(f"darnlang: adding {len(words)} word(s) from {os.path.relpath(path, root)} "
+              f"to the built-in list.", file=sys.stderr)
+    return words
+
+
 def _words(root: str, arg: str | None) -> list[str] | None:
-    path = arg or next((p for p in (os.path.join(root, n) for n in WORDS_FILENAMES)
-                        if os.path.exists(p)), None)
+    path = arg
     if not path:
         return None
     try:
@@ -136,8 +156,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     root = project_root(getattr(args, "root", None))
-    pattern = build_pattern(_words(root, getattr(args, "words_file", None)),
-                            _read_words(getattr(args, "extra_words_file", None)))
+    extra = (_read_words(getattr(args, "extra_words_file", None)) or []) + (_autodetected(root) or [])
+    pattern = build_pattern(_words(root, getattr(args, "words_file", None)), extra or None)
 
     if args.cmd == "prose":
         try:

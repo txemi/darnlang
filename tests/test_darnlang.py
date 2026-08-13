@@ -483,3 +483,18 @@ def test_a_replacement_wordlist_still_replaces(tmp_path):
     p = build_pattern(["gaztelania"])
     assert p.search("hau gaztelania da")
     assert not p.search("esto que tal")
+
+
+def test_an_autodetected_wordlist_extends_and_does_not_replace(tmp_path):
+    """Found while wiring a repo that ships `scripts/devtools/spanish_words.txt`: the file was picked
+    up by NAME, silently swapped out the built-in function words, and the gate stopped catching
+    the commonest marker there is. A file discovered by convention must not change the
+    meaning of the detector behind your back."""
+    repo = _repo(tmp_path / "repo", {
+        "scripts/devtools/spanish_words.txt": "bloquea\ncalidad\n",
+        "a.py": "# corrige el fallo que rompia la ejecucion\n",     # built-in words only
+        "b.py": "# bloquea cuando calidad insuficiente\n"})          # repo list only
+    assert _run(["update-baseline"], repo) == 0
+    import json
+    files = json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))["files"]
+    assert "a.py" in files and "b.py" in files

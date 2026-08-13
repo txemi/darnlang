@@ -4,6 +4,18 @@ All notable changes to darnlang are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-08-13
+
+### Fixed
+- **An auto-detected wordlist silently REPLACED the built-in one.** Found while wiring a repo that
+  happens to ship `scripts/devtools/spanish_words.txt`: the file was picked up by name, swapped out
+  the built-in function words, and the gate stopped catching `que`, `el`, `la` — the most common
+  markers there are. Nothing said so, and the repo would have run a weaker detector believing it ran
+  a stronger one.
+
+  A file discovered by **convention** now EXTENDS the built-in list and says which file it used.
+  Only an explicit `--words-file` replaces, because that is a decision somebody typed.
+
 ## [0.5.0] — 2026-08-13
 
 ### Added
