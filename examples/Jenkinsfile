@@ -12,9 +12,14 @@ pipeline {
   agent any
 
   environment {
-    // Pin the version. `uvx darnlang` alone resolves to whatever is newest, so a detector
+    // Pin the version. A floating `darnlang` resolves to whatever is newest, so a detector
     // improvement upstream could turn a green build red on a day nobody touched this repo.
-    DARNLANG = 'darnlang==0.1.0'
+    //
+    // A GIT REF, not a PyPI specifier, until the package is published: `darnlang==0.1.0` cannot be
+    // resolved at all, and uvx's failure is rc=1 -- which this pipeline's own case statement then
+    // reports as "found lines in the wrong language". A pinned version that does not exist is worse
+    // than a floating one, because it fails as the thing it was meant to detect.
+    DARNLANG = 'git+https://github.com/txemi/darnlang@v0.2.0'
     // Where `pip install --user` and uv put console scripts.
     PATH = "${env.HOME}/.local/bin:${env.PATH}"
   }
@@ -36,8 +41,14 @@ pipeline {
           if (rc == 2) {
             error 'darnlang coverage changed: re-seed with `darnlang update-baseline` and commit it.'
           }
+          if (rc == 1) {
+            error 'darnlang found lines in the wrong language.'
+          }
           if (rc != 0) {
-            error "darnlang found lines in the wrong language (rc=${rc})."
+            // Anything else is the tool failing to start -- a missing package, a bad ref, no
+            // network. Saying "wrong language" there sends somebody hunting through prose for a
+            // problem that is in the pipeline. Every unmapped code is "could not run".
+            error "darnlang could not run (rc=${rc}). This is not a language finding."
           }
         }
       }
@@ -56,8 +67,11 @@ pipeline {
           printf '%s\\n\\n%s\\n' "$CHANGE_TITLE" "${CHANGE_BODY:-}" > darnlang-pr.txt
           uvx --from "$DARNLANG" darnlang prose darnlang-pr.txt --label "PR title/description"
 
+          # FETCH_HEAD, not origin/$CHANGE_TARGET: `git fetch <remote> <branch>` only updates a
+          # remote-tracking ref when the configured refspec matches, and a Jenkins workspace is
+          # often cloned with a narrow single-branch refspec. FETCH_HEAD is refspec-independent.
           git fetch --no-tags origin "$CHANGE_TARGET"
-          git log --format=%B "origin/$CHANGE_TARGET..HEAD" > darnlang-msgs.txt
+          git log --format=%B "FETCH_HEAD..HEAD" > darnlang-msgs.txt
           uvx --from "$DARNLANG" darnlang prose darnlang-msgs.txt --label "set of commit messages"
         '''
       }

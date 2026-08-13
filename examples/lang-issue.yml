@@ -28,7 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv pip install --system darnlang
+      # NOT `uv pip install --system`: a runner's interpreter is externally managed and that fails.
+      # NOT the bare name either, until the package is on PyPI. Pin the ref you actually consume.
+      - run: uv tool install "git+https://github.com/txemi/darnlang@v0.2.0"
+      - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Judge the issue title and body
         id: check
@@ -39,11 +42,21 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
           printf '%s\n\n%s\n' "$ISSUE_TITLE" "$ISSUE_BODY" > "$RUNNER_TEMP/issue.txt"
-          if darnlang prose "$RUNNER_TEMP/issue.txt" --label issue; then
-            echo "clean=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "clean=false" >> "$GITHUB_OUTPUT"
-          fi
+          set +e
+          darnlang prose "$RUNNER_TEMP/issue.txt" --label issue
+          rc=$?
+          set -e
+          # THE EXIT CODE IS A CONTRACT, and this is the one place where confusing its values does
+          # damage to a person rather than to a build. `if cmd; then` maps EVERY non-zero to
+          # "wrong language", including 3 = "I could not run". That would label a stranger's bug
+          # report and post a public comment telling them their language is wrong, because the tool
+          # failed to start. Only 1 means a finding.
+          case "$rc" in
+            0) echo "clean=true"  >> "$GITHUB_OUTPUT" ;;
+            1) echo "clean=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::darnlang could not run (rc=$rc). Not labelling anybody over a broken gate."
+               exit "$rc" ;;
+          esac
 
       - name: Flag it
         if: steps.check.outputs.clean == 'false'

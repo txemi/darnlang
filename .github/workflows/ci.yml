@@ -27,6 +27,33 @@ jobs:
       - run: uv pip install -e ".[dev]"
       - run: uv run pytest -q
 
+  # Every YAML this repo SHIPS must parse. `action.yml` shipped broken through two tags -- an
+  # unquoted `": "` inside a description -- and nothing noticed, because the only thing that would
+  # have loaded it is a consumer, and this repo's own CI reinvented the action's three steps by hand
+  # instead of using it. A file nobody parses is a file nobody validates.
+  yaml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every shipped YAML parses
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+          bad = []
+          for p in sorted(pathlib.Path('.').rglob('*.y*ml')):
+              if '.git/' in str(p):
+                  continue
+              try:
+                  yaml.safe_load(p.read_text(encoding='utf-8'))
+              except Exception as exc:
+                  bad.append(f'{p}: {exc}')
+          # Extensionless YAML that ships as an example is covered by name, since rglob misses it.
+          for extra in ('examples/Jenkinsfile',):
+              pathlib.Path(extra).exists() or bad.append(f'{extra}: missing')
+          print('\n'.join(bad) or f'ok')
+          sys.exit(1 if bad else 0)
+          PY
+
   # Dogfood. A language gate that is not clean in its own repo has no argument to make.
   self:
     runs-on: ubuntu-latest
@@ -37,15 +64,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv venv --clear   # setup-uv already makes one when given a python-version
       - run: uv pip install -e .
-      - name: Files (this repo pins its baseline at 0)
-        run: uv run darnlang check --ext .py,.md
-      - name: Commit messages added by this PR
-        if: github.event_name == 'pull_request'
-        run: |
-          git log --format=%B \
-            "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}" \
-            > "$RUNNER_TEMP/msgs.txt"
-          uv run darnlang prose "$RUNNER_TEMP/msgs.txt" --label "set of commit messages"
+      # Uses its OWN composite action rather than hand-rolling the steps. That is the point of
+      # shipping one: if it is broken, this build is the thing that finds out, not a consumer.
+      - name: Files, commit messages and PR text — via the action this repo ships
+        uses: ./
+        with:
+          ext: .py,.md
+          version: .
 
   # Proves the thing a user actually types, from a clean environment and with no dev extras.
   smoke:

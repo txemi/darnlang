@@ -25,11 +25,11 @@ the least retractable ones you have. An indexed pull-request title cannot be tak
 
 ```bash
 # no install at all
-uvx --from git+https://github.com/txemi/darnlang@v0.1.0 darnlang check
+uvx --from git+https://github.com/txemi/darnlang@v0.2.0 darnlang check
 
 # or properly
-pipx install git+https://github.com/txemi/darnlang@v0.1.0
-pip install 'darnlang[strict] @ git+https://github.com/txemi/darnlang@v0.1.0'   # + deep layer
+pipx install git+https://github.com/txemi/darnlang@v0.2.0
+pip install 'darnlang[strict] @ git+https://github.com/txemi/darnlang@v0.2.0'   # + deep layer
 ```
 
 <sub>Once it is published the short forms — `uvx darnlang`, `pip install darnlang` — start working
@@ -133,7 +133,7 @@ A genuine false positive is silenced with `lang-ok` on the line — `# lang-ok` 
 ```yaml
 repos:
   - repo: https://github.com/txemi/darnlang
-    rev: v0.1.0
+    rev: v0.2.0
     hooks:
       - id: darnlang           # added lines only
       - id: darnlang-commit-msg
@@ -142,7 +142,7 @@ repos:
 **GitHub Actions** — the three published surfaces, which is the point of the tool:
 
 ```yaml
-- uses: txemi/darnlang@v0.1.0
+- uses: txemi/darnlang@v0.2.0
   with:
     ext: .py,.md
     surfaces: files,commits,pr    # issues need their own workflow: see action.yml
@@ -157,9 +157,10 @@ stage('darnlang') {
   steps {
     sh '''
       set -eu
-      # uvx needs no venv and leaves nothing behind. `pip install --user darnlang` works too.
+      # uvx needs no venv and leaves nothing behind. Pin the ref: a version that cannot be resolved
+      # fails with rc=1, which a naive pipeline then reports as "wrong language".
       export PATH="$HOME/.local/bin:$PATH"
-      uvx darnlang check --ext .py,.md
+      uvx --from git+https://github.com/txemi/darnlang@v0.2.0 darnlang check --ext .py,.md
     '''
   }
 }
@@ -176,9 +177,9 @@ Three things that are specific to Jenkins and cost time to rediscover:
 
   ```groovy
   script {
-    def rc = sh(returnStatus: true, script: 'uvx darnlang check --ext .py,.md')
-    if (rc == 3) { error 'darnlang could not run — this is not a pass' }
-    if (rc != 0) { error "darnlang found issues (rc=${rc})" }
+    def rc = sh(returnStatus: true, script: 'uvx --from "$DARNLANG" darnlang check --ext .py,.md')
+    if (rc == 1) { error 'darnlang found lines in the wrong language' }
+    if (rc != 0) { error "darnlang could not run (rc=${rc}) — this is not a language finding" }
   }
   ```
 
@@ -191,9 +192,12 @@ Three things that are specific to Jenkins and cost time to rediscover:
     sh '''
       set -eu
       printf '%s\\n\\n%s\\n' "$CHANGE_TITLE" "${CHANGE_BODY:-}" > pr.txt
-      uvx darnlang prose pr.txt --label "PR title/description"
-      git log --format=%B "origin/${CHANGE_TARGET}..HEAD" > msgs.txt
-      uvx darnlang prose msgs.txt --label "set of commit messages"
+      uvx --from "$DARNLANG" darnlang prose pr.txt --label "PR title/description"
+      # FETCH_HEAD, not origin/$CHANGE_TARGET: a Jenkins workspace is often cloned with a narrow
+      # single-branch refspec, and then `git fetch <remote> <branch>` updates no tracking ref.
+      git fetch --no-tags origin "$CHANGE_TARGET"
+      git log --format=%B "FETCH_HEAD..HEAD" > msgs.txt
+      uvx --from "$DARNLANG" darnlang prose msgs.txt --label "set of commit messages"
     '''
   }
   ```

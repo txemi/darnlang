@@ -2,13 +2,17 @@
 #
 #   repos:
 #     - repo: https://github.com/txemi/darnlang
-#       rev: v0.1.0
+#       rev: v0.2.0
 #       hooks: [{id: darnlang}, {id: darnlang-commit-msg}]
 #
 # Two hooks and not one, because they guard different things at different moments: `darnlang` judges
 # the lines a commit ADDS, and `darnlang-commit-msg` judges the message describing them — the only
 # moment that message is still free to fix. Once it is pushed and merged it is permanent.
 
+# `stages:` is not optional here. Without it a hook with `always_run: true` fires in EVERY installed
+# stage -- so a repo that installs both hook types runs the added-lines check twice per commit,
+# doubling the cost of the hook whose entire selling point is being cheap enough for dozens of runs
+# a day. Measured with real pre-commit before this line existed.
 - id: darnlang
   name: darnlang (added lines)
   description: Fail the commit if the lines it adds are in the wrong language.
@@ -16,6 +20,7 @@
   language: python
   pass_filenames: false
   always_run: true
+  stages: [pre-commit]
 
 - id: darnlang-commit-msg
   name: darnlang (commit message)
@@ -31,3 +36,4 @@
   language: python
   pass_filenames: false
   always_run: true
+  stages: [pre-push]

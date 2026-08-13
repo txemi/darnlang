@@ -2,26 +2,26 @@
 # reinventing the three steps — which is how they end up subtly different per repo, which is the
 # whole problem this tool was extracted to stop.
 name: darnlang
-description: Keep a repo's prose in one language — files, commit messages, and PR title/description.
+description: "Keep a repo's prose in one language: files, commit messages, and PR title/description."
 branding:
   icon: message-square
   color: purple
 
 inputs:
   ext:
-    description: Extensions to scan, comma-separated, or 'all'.
+    description: "Extensions to scan, comma-separated, or 'all'."
     required: false
     default: .py
   surfaces:
-    description: Which surfaces to judge, comma-separated: files, commits, pr.
+    description: "Which surfaces to judge, comma-separated: files, commits, pr."
     required: false
     default: files,commits,pr
   version:
-    description: Version of darnlang to install (a PyPI specifier or a git ref).
+    description: "Version of darnlang to install (a PyPI specifier or a git ref)."
     required: false
-    default: darnlang
+    default: "git+https://github.com/txemi/darnlang@v0.2.0"
   show-text:
-    description: Print the offending lines. Off by default — CI logs of a public repo are public.
+    description: "Print the offending lines. Off by default: CI logs of a public repo are public."
     required: false
     default: "false"
 
@@ -30,7 +30,14 @@ runs:
   steps:
     - name: Install darnlang
       shell: bash
-      run: pipx install "${{ inputs.version }}" || pip install --user "${{ inputs.version }}"
+      # `uv tool install` rather than `pipx`: setup-uv is already the way every workflow here
+      # gets a toolchain, and `pip install --user` on a runner hits the externally-managed
+      # interpreter. Verified by running the composite steps locally, which is how the YAML error
+      # below was missed for two tags -- nothing ever loaded this file.
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        "$HOME/.local/bin/uv" tool install "${{ inputs.version }}"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Files (whole tree vs the baseline)
       if: contains(inputs.surfaces, 'files')
