@@ -266,3 +266,30 @@ def test_strict_without_the_extra_refuses_instead_of_reporting_clean(tmp_path):
     repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
     assert _run(["update-baseline"], repo) == 0
     assert _run(["check", "--strict"], repo) == 3
+
+
+@pytest.mark.skipif(not _has_langdetect(), reason="needs the 'strict' extra")
+def test_strict_prose_catches_a_short_commit_subject_the_wordlist_cannot(tmp_path):
+    """Found by dogfooding, on the very commit that migrated the first repo to this tool: "migra el
+    gate de idioma al paquete darnlang" carries no accent and none of the dictionary's function
+    words, so the cheap layers pass it. A commit subject is short by nature — the case a stopword
+    list cannot cover."""
+    msg = tmp_path / "msg.txt"
+    msg.write_text("migra el gate de idioma al paquete darnlang\n", encoding="utf-8")
+    assert _run(["prose", str(msg)], tmp_path) == 0             # layers 1+2 miss it
+    assert _run(["prose", str(msg), "--strict"], tmp_path) == 1  # layer 3 catches it
+
+
+@pytest.mark.skipif(not _has_langdetect(), reason="needs the 'strict' extra")
+def test_strict_prose_does_not_fire_on_english():
+    """langdetect labelled that same Spanish subject as CATALAN, which is why layer 3 asks "is this
+    NOT English" rather than "is this Spanish". The cost of that framing is false positives on
+    English, so it is pinned here."""
+    import tempfile
+    for text in ("migrates the language gate to the darnlang package\n",
+                 "fix: derive the scanned tree and the baseline from one root\n",
+                 "docs: Jenkins, which the wiring section had left out\n"):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
+            fh.write(text)
+            path = fh.name
+        assert main(["prose", path, "--strict"]) == 0, text

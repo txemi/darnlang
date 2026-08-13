@@ -143,8 +143,19 @@ def offending(line: str, path: str, pattern: re.Pattern[str], in_fence: bool = F
     return bool(pattern.search(text))
 
 
-def langdetect_says_foreign(text: str, langs: frozenset[str]) -> bool:
+#: The languages a project accepts. Everything else is a finding.
+DEFAULT_ALLOWED = frozenset({"en"})
+
+
+def langdetect_is_foreign(text: str, allowed: frozenset[str] = DEFAULT_ALLOWED) -> bool:
     """Layer 3. Requires the `strict` extra; absent, the caller must not call this.
+
+    ASKS "IS THIS NOT ONE OF THE ACCEPTED LANGUAGES", not "is this Spanish". The difference is not
+    pedantry, it was measured: `langdetect` labels the real commit subject *"migra el gate de idioma
+    al paquete darnlang"* as **Catalan**. Asking "is it Spanish" answers no and lets it through;
+    asking "is it English" answers no and catches it. The rule a project actually writes down is
+    "everything here is in English", so that is the question to ask — and it makes the tool work for
+    a project whose other language is not the one this was built for.
 
     Kept behind an extra on purpose. The zero-dependency path is what lets this run first in a
     pre-commit that fires dozens of times a day; `langdetect` needs a resolved environment, which is
@@ -153,6 +164,8 @@ def langdetect_says_foreign(text: str, langs: frozenset[str]) -> bool:
     from langdetect import LangDetectException, detect  # noqa: PLC0415  (optional dependency)
 
     try:
-        return detect(text) in langs
+        return detect(text) not in allowed
     except LangDetectException:
+        # Undecidable input (punctuation, identifiers, two words). NOT a finding: layer 3 exists to
+        # add signal the cheap layers missed, never to invent it.
         return False

@@ -4,6 +4,25 @@ All notable changes to darnlang are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-08-13
+
+### Fixed
+- **Layer 3 asked the wrong question.** It tested "is this Spanish"; it now tests **"is this not one
+  of the accepted languages"** (default: English). Not pedantry — measured: `langdetect` labels the
+  real commit subject *"migra el gate de idioma al paquete darnlang"* as **Catalan**, so the old
+  question answered *no* and let it through. The new one answers *not English* and catches it. It
+  also makes the tool useful to a project whose other language is not the one this was built for.
+- **`--strict` without the extra installed used to warn and carry on**, which means a caller who
+  asked for the deep layer, did not get it, and saw exit 0 was told the tree was clean by a check
+  that never ran. It now exits **3**, the same code as any other "could not run".
+
+### Added
+- **`prose --strict`.** The cheap layers are weakest exactly where this tool matters most: a commit
+  subject is short by nature, and a stopword list needs stopwords. Found by dogfooding — the commit
+  that migrated the first repo onto darnlang was itself in the wrong language, passed the hook, and
+  was caught only by adding this. The text is judged as one block rather than line by line, because
+  a subject alone is often too short to classify.
+
 ## [0.1.0] — 2026-08-13
 
 First release. Extracted from a script that had been vendored, byte for byte, into four repositories

@@ -19,7 +19,8 @@ import os
 import sys
 
 from . import baseline as bl
-from .detect import CODE_EXTS, DOC_EXTS, ESCAPE, build_pattern, langdetect_says_foreign
+from .detect import (CODE_EXTS, DEFAULT_ALLOWED, DOC_EXTS, ESCAPE, build_pattern,
+                     langdetect_is_foreign, strip_verbatim)
 from .project import baseline_path, project_root
 from .scan import Hit, NothingToScan, scan_diff, scan_prose, scan_tree
 
@@ -103,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--show-text", action="store_true")
     p.add_argument("--words-file")
     p.add_argument("--root")
+    p.add_argument("--strict", action="store_true",
+                   help="also ask langdetect whether the whole text is English (needs the 'strict' extra)")
 
     args = ap.parse_args(argv)
     root = project_root(getattr(args, "root", None))
@@ -117,6 +120,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"darnlang: cannot read {args.file} ({exc})", file=sys.stderr)
             return 3
         hits = scan_prose(text, pattern, git_comments=args.git_comments)
+        if not hits and args.strict:
+            # The cheap layers are weakest exactly here. Measured on this tool's own migration
+            # commit: "migra el gate de idioma al paquete darnlang" carries no accent and none of
+            # the dictionary's function words, so layers 1+2 pass it -- and a commit subject is
+            # short by nature, which is the case a stopword list cannot cover. Judged as ONE text
+            # rather than line by line, because a subject alone is often too short to classify.
+            try:
+                hits = _strict_prose(text, args.git_comments)
+            except StrictUnavailable as exc:
+                print(f"darnlang: {exc}", file=sys.stderr)
+                return 3
         if hits:
             _report(hits, f"darnlang: this {args.label} is not in the expected language:",
                     args.show_text)
@@ -210,6 +224,25 @@ class StrictUnavailable(Exception):
     """`--strict` was asked for and layer 3 cannot run."""
 
 
+def _strict_prose(text: str, git_comments: bool) -> list[Hit]:
+    """Layer 3 over free prose, as a single block."""
+    try:
+        import langdetect  # noqa: F401,PLC0415
+    except ImportError as exc:
+        raise StrictUnavailable(
+            "--strict needs the 'strict' extra (pip install 'darnlang[strict]')."
+        ) from exc
+    kept = []
+    for ln in text.splitlines():
+        if git_comments and ln.startswith("#"):
+            continue
+        kept.append(strip_verbatim(ln))
+    body = " ".join(l.strip() for l in kept if l.strip())
+    if len(body) >= 20 and langdetect_is_foreign(body, DEFAULT_ALLOWED):
+        return [Hit("<text>", 1, body[:200], code="langdetect")]
+    return []
+
+
 def _add_langdetect(root: str, exts: tuple[str, ...], hits: list[Hit]) -> list[Hit]:
     """Layer 3, opt-in. Never replaces the cheap layers; only adds what they missed.
 
@@ -232,7 +265,6 @@ def _add_langdetect(root: str, exts: tuple[str, ...], hits: list[Hit]) -> list[H
 
     seen = {(h.path, h.line) for h in hits}
     extra: list[Hit] = []
-    langs = frozenset({"es"})
     for rel in _files(root, tracked_only=True):
         if exts and not rel.lower().endswith(exts):
             continue
@@ -251,7 +283,7 @@ def _add_langdetect(root: str, exts: tuple[str, ...], hits: list[Hit]) -> list[H
             s = ln.strip()
             # Short strings are where langdetect is worst; below ~25 chars it guesses. The cheap
             # layers already cover short prose via the wordlist, so this floor costs nothing.
-            if len(s) >= 25 and langdetect_says_foreign(s, langs):
+            if len(s) >= 25 and langdetect_is_foreign(s):
                 extra.append(Hit(rel, i, s, code="langdetect"))
     return hits + extra
 
