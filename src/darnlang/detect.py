@@ -171,7 +171,16 @@ def langdetect_is_foreign(text: str, allowed: frozenset[str] = DEFAULT_ALLOWED) 
     pre-commit that fires dozens of times a day; `langdetect` needs a resolved environment, which is
     exactly the cost that turns a local gate into a silent no-op on an unprovisioned machine.
     """
-    from langdetect import LangDetectException, detect  # noqa: PLC0415  (optional dependency)
+    from langdetect import DetectorFactory, LangDetectException  # noqa: PLC0415
+    from langdetect import detect
+
+    # SEEDED, and this is not tidiness. `langdetect` samples internally, so the same text can be
+    # classified differently on two consecutive calls. Measured through the shipped issue workflow:
+    # 300 identical runs over one unchanged ENGLISH issue returned rc=1 twice. rc=1 on that surface
+    # means a label AND a public comment telling a stranger their bug report is in the wrong
+    # language -- and unlike the label, a comment does not heal on the next edit. A coin-flip
+    # pointed at other people is not a gate.
+    DetectorFactory.seed = 0
 
     try:
         return detect(text) not in allowed

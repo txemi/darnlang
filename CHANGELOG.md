@@ -4,6 +4,29 @@ All notable changes to darnlang are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-08-13
+
+Two defects found by an adversarial review of the workflow that publishes comments to strangers.
+Both are the same shape: the tool answered a question it had not actually been asked.
+
+### Fixed
+- **Layer 3 was non-deterministic.** `langdetect` samples internally and no seed was set, so the
+  same text could be classified differently on consecutive calls. Measured through the shipped issue
+  workflow: **300 identical runs over one unchanged ENGLISH issue returned a finding twice.** On that
+  surface a finding means a label *and* a public comment telling somebody their bug report is in the
+  wrong language — and unlike the label, a comment does not heal when the text is edited. Seeded, and
+  pinned by a test.
+- **An empty `--extra-words-file` was silently ignored.** A consumer had been passing `""` for weeks
+  — the variable holding the path was exported in one CI step and read in another process — and the
+  tool ran a different detector than the one it was asked for, reported clean, and said nothing. An
+  argument that was given must be honoured or refused; ignoring it is the third option nobody wants.
+  Now exit 3.
+
+### Added
+- `tools/darnlang_ref.sh`, which this repo lacked while its own workflows sourced it. It points at
+  the working tree rather than a published tag: gating this repo with an older release would let a
+  regression through on the very commit that introduces it.
+
 ## [0.6.0] — 2026-08-13
 
 ### Fixed

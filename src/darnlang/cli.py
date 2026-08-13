@@ -22,6 +22,10 @@ from . import baseline as bl
 from .detect import (CODE_EXTS, DEFAULT_ALLOWED, DOC_EXTS, ESCAPE, build_pattern,
                      langdetect_is_foreign, strip_verbatim)
 from .project import ForeignBaseline, baseline_path, project_root
+
+
+class EmptyWordlistArgument(Exception):
+    """A wordlist flag was given an empty path."""
 from .detect import is_fence
 from .scan import Hit, NothingToScan, scan_diff, scan_prose, scan_tree
 
@@ -46,9 +50,21 @@ def _exts(arg: str | None) -> tuple[str, ...]:
                          for e in (x.strip().lower() for x in raw.split(",")) if e}))
 
 
-def _read_words(path: str | None) -> list[str] | None:
-    if not path:
+def _read_words(path: str | None, *, flag: str = "") -> list[str] | None:
+    """Read a wordlist. An EMPTY string is an error, not an absence.
+
+    A consumer passed `--extra-words-file ""` for weeks -- the variable holding the path was exported
+    in one CI step and read in another process -- and this function's `if not path: return None`
+    turned that into a silent no-op. The log said clean, the file was never opened, and the one thing
+    that made that repo's configuration different was inert. An argument that was given must be
+    honoured or refused; ignoring it is the third option nobody wants.
+    """
+    if path is None:
         return None
+    if not path.strip():
+        raise EmptyWordlistArgument(
+            f"{flag or '--words-file'} was given an EMPTY path. Ignoring it would run a different "
+            f"detector than the one you asked for, and say nothing.")
     try:
         with open(path, encoding="utf-8") as fh:
             return [ln.strip() for ln in fh if ln.strip() and not ln.startswith("#")]
@@ -156,8 +172,13 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     root = project_root(getattr(args, "root", None))
-    extra = (_read_words(getattr(args, "extra_words_file", None)) or []) + (_autodetected(root) or [])
-    pattern = build_pattern(_words(root, getattr(args, "words_file", None)), extra or None)
+    try:
+        extra = ((_read_words(getattr(args, "extra_words_file", None), flag="--extra-words-file") or [])
+                 + (_autodetected(root) or []))
+        pattern = build_pattern(_words(root, getattr(args, "words_file", None)), extra or None)
+    except EmptyWordlistArgument as exc:
+        print(f"darnlang: {exc}", file=sys.stderr)
+        return 3
 
     if args.cmd == "prose":
         try:

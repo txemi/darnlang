@@ -498,3 +498,24 @@ def test_an_autodetected_wordlist_extends_and_does_not_replace(tmp_path):
     import json
     files = json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))["files"]
     assert "a.py" in files and "b.py" in files
+
+
+# --- determinism and honest flags ---------------------------------------------------------------
+
+@pytest.mark.skipif(not _has_langdetect(), reason="needs the 'strict' extra")
+def test_layer_three_is_deterministic(tmp_path):
+    """Unseeded, langdetect samples internally: 300 identical runs over one unchanged ENGLISH issue
+    returned rc=1 twice, and on the issue surface rc=1 means a public comment telling a stranger
+    their report is in the wrong language. A comment does not heal on the next edit."""
+    from darnlang.detect import langdetect_is_foreign
+    text = "GitHub Actions runner uv install darnlang prose strict label issue"
+    verdicts = {langdetect_is_foreign(text) for _ in range(80)}
+    assert len(verdicts) == 1, "layer 3 gave different answers for the same text"
+
+
+def test_an_empty_wordlist_path_is_refused_not_ignored(tmp_path):
+    """A consumer passed `--extra-words-file ""` for weeks and the tool silently ran a different
+    detector than the one it was asked for. An argument that was given must be honoured or refused."""
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    assert _run(["update-baseline"], repo) == 0
+    assert _run(["check", "--extra-words-file", ""], repo) == 3
