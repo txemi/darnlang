@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# PRIVACY GATE, LOCALLY — the last moment anything can still be taken back.
+#
+# WHY LOCAL AND NOT ONLY IN CI. The CI gate is a real wall, but it fires AFTER the push, and by then
+# two of the three surfaces are already permanent:
+#
+#   * a pushed COMMIT MESSAGE cannot be changed without rewriting history, and once anyone has
+#     fetched it, not even then;
+#   * a pull-request title or body is rendered as indexed public HTML, and editing it leaves the
+#     previous text readable through the API. It cannot be deleted.
+#
+# So CI can only tell you it already happened. `pre-push` is the last point where the answer is
+# still "amend it and move on" instead of "it is out there". That is the whole argument for this
+# file existing alongside the workflow rather than instead of it.
+#
+# WHERE THE PATTERN LIST LIVES. Not in this repo — it is public, and a list of private names cannot
+# live in the thing it protects. Resolution order:
+#
+#   1. $PRIVACY_DENYLIST_FILE
+#   2. ~/.config/privacy-denylist.txt
+#
+# One extended regex per line, `#` comments ignored.
+#
+# ⚠️ ABSENT LIST = SKIP, LOUDLY. Deliberately NOT fail-closed, and the reasoning is the opposite of
+# the CI job's. This gate protects the AUTHOR from publishing their OWN private names; somebody who
+# cloned this repo has none of them to leak, and blocking their push over a file they cannot be
+# expected to have would be hostile for no gain. CI stays fail-closed, so the wall is not lost —
+# only the early warning is, and only for people it does not apply to.
+#
+# Activate:  git config core.hooksPath hooks   (or let a global dispatcher run it)
+# Bypass:    git push --no-verify
+set -euo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+LIST="${PRIVACY_DENYLIST_FILE:-$HOME/.config/privacy-denylist.txt}"
+
+if [ ! -f "$LIST" ]; then
+  echo "privacy pre-push: no denylist at $LIST -> SKIPPING (CI still gates, fail-closed)." >&2
+  exit 0
+fi
+
+# Patterns never touch the command line and are never echoed: a shell history or a `ps` listing is
+# one more place they would end up.
+mapfile -t PATTERNS < <(grep -vE '^\s*(#|$)' "$LIST")
+[ "${#PATTERNS[@]}" -eq 0 ] && { echo "privacy pre-push: denylist is empty -> SKIPPING." >&2; exit 0; }
+
+REMOTE_REF="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+if [ -n "$REMOTE_REF" ] && git rev-parse --verify --quiet "$REMOTE_REF" >/dev/null; then
+  RANGE="$REMOTE_REF..HEAD"
+else
+  RANGE="HEAD"   # nothing pushed yet: judge everything rather than nothing
+fi
+
+found=0
+report() {
+  # NEVER print the match. A terminal scrolls into a screenshot, a paste, a transcript — and the
+  # offending text is the one thing that must not be copied anywhere else.
+  echo "privacy pre-push: private reference in $1" >&2
+  found=1
+}
+
+for pat in "${PATTERNS[@]}"; do
+  while IFS= read -r sha; do
+    [ -z "$sha" ] && continue
+    report "commit message $sha"
+  done < <(git log --format='%H' -E --grep="$pat" -i "$RANGE" 2>/dev/null || true)
+
+  if git -C "$ROOT" grep -qiE -- "$pat" -- . 2>/dev/null; then
+    report "a tracked file (run: git grep -inE '<your pattern>')"
+  fi
+done
+
+if [ "$found" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+Nothing was pushed. A commit message cannot be edited after a push without rewriting history, and a
+pull-request body cannot be retracted at all — which is why this runs here and not only in CI.
+
+  amend the message:  git commit --amend   (or: git rebase -i)
+  then push again.
+MSG
+  exit 1
+fi
+exit 0

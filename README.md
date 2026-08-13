@@ -211,6 +211,21 @@ Three things that are specific to Jenkins and cost time to rediscover:
   published, on any forge. That surface stays with the forge's own automation
   (`examples/lang-issue.yml`), and it can only label, never block.
 
+## Privacy: the same check, twice, on purpose
+
+`.github/workflows/privacy-gate.yml` blocks private references from reaching this repo, and
+`hooks/pre-push` runs the same check **before the push**. That is not redundancy — CI fires *after*,
+and by then two of the three surfaces are permanent: a pushed commit message needs a history rewrite,
+and a pull-request body is indexed public HTML that editing does not retract. Local is the last point
+where the answer is still "amend it".
+
+The pattern list is never in this repo — a list of private names cannot live in what it protects.
+CI reads a secret; the hook reads `$PRIVACY_DENYLIST_FILE` or `~/.config/privacy-denylist.txt`.
+
+The two ends differ on purpose: **CI fails closed** without the list, the **hook skips loudly**. The
+hook protects the author from publishing their own private names, and somebody who cloned this repo
+has none of them — blocking their push over a file they cannot have would be hostile for no gain.
+
 ## Why the matched text is not printed
 
 By default findings are reported as `path:line`, without the offending text. CI logs of a public
