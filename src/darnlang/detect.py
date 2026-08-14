@@ -63,8 +63,21 @@ _CODE_PUNCT = re.compile(r"[=(){}\[\];:]|^\s*(def|class|import|from|return|del)\
 #: File families. `code` means "only comments and docstrings are prose"; `doc` means "everything is
 #: prose except fenced blocks". Anything not listed is treated as `doc`, because a file type nobody
 #: classified is far more likely to be text than to be Python.
-CODE_EXTS = frozenset({".py", ".pyi"})
+#:
+#: CONFIGURATION AND CI ARE CODE, and adding them is not a formality. `--ext all` used to mean ten
+#: extensions, all of them source or documentation -- so the files that carry the WHY of a project
+#: (a pipeline explaining which build broke and why the fix looks odd, a `pyproject` comment
+#: explaining a pin) were the ones nobody judged. Measured across seven repos when this was added:
+#: 84 lines in 3 of them, and 4 repos entered at zero cost.
+CODE_EXTS = frozenset({".py", ".pyi",
+                       ".yml", ".yaml", ".toml", ".cfg", ".ini",
+                       ".sh", ".bash", ".groovy", ".gradle"})
 DOC_EXTS = frozenset({".md", ".markdown", ".rst", ".txt", ".html", ".htm", ".jinja", ".j2"})
+
+#: Files with NO extension that are still code. `family()` decides by extension, so without this a
+#: `Jenkinsfile` falls through to `doc` and every line of a pipeline gets read as prose -- which is
+#: worse than not scanning it, because a pipeline is mostly punctuation and would report constantly.
+CODE_NAMES = frozenset({"Jenkinsfile", "Dockerfile", "Makefile", "Containerfile", "Vagrantfile"})
 
 
 def build_pattern(words: list[str] | None, extra: list[str] | None = None) -> re.Pattern[str]:
@@ -112,7 +125,11 @@ def is_commentish(line: str) -> bool:
     in the other language — fires on real code.
     """
     s = line.strip()
-    if s.startswith("#"):
+    # `#` covers Python, shell, YAML, TOML and ini. `//` and `/*` cover Groovy, and therefore the
+    # Jenkinsfiles that carry the reason a pipeline is shaped the way it is -- which is exactly the
+    # prose most worth judging and, until this was added, the only comment style the tool could not
+    # see. Measured on one repo: 13 of its 17 unjudged Spanish lines were `//` comments.
+    if s.startswith("#") or s.startswith("//") or s.startswith("/*") or s.startswith("*"):
         return True
     if '"""' in s or "'''" in s:
         return True
@@ -120,9 +137,19 @@ def is_commentish(line: str) -> bool:
 
 
 def family(path: str) -> str:
-    """`code` or `doc`, by extension. Unknown extensions are `doc` — see CODE_EXTS."""
-    dot = path.rfind(".")
-    ext = path[dot:].lower() if dot != -1 else ""
+    """`code` or `doc`, by extension and then by NAME. Unknown extensions are `doc` — see CODE_EXTS.
+
+    The name check exists for the extensionless files a repo's CI lives in (`Jenkinsfile`,
+    `Dockerfile`). Deciding by extension alone sent those to `doc`, where every line counts as
+    prose — and a pipeline is mostly punctuation, so the gate would have fired on the code itself.
+    A basename comparison, not a suffix one: `Jenkinsfile.lang_coverage` is judged by its extension
+    like anything else, and `my_Dockerfile_notes.md` stays a document.
+    """
+    base = path.replace("\\", "/").rsplit("/", 1)[-1]
+    if base in CODE_NAMES:
+        return "code"
+    dot = base.rfind(".")
+    ext = base[dot:].lower() if dot > 0 else ""
     return "code" if ext in CODE_EXTS else "doc"
 
 

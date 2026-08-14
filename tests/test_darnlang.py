@@ -562,3 +562,49 @@ def test_a_wordlist_outside_the_repo_does_not_silently_exclude_nothing(tmp_path)
     outside = tmp_path / "elsewhere.txt"
     outside.write_text("porque\n", encoding="utf-8")
     assert wordlist_paths(str(repo), str(outside)) == ()
+
+
+# --- configuration and CI are code, and their comments are prose ---------------------------------
+
+def test_a_jenkinsfile_is_judged_at_all(tmp_path):
+    """A Jenkinsfile has NO extension, so the suffix test that filters the scan rejected it however
+    wide --ext was. The file family said `code` and the scan never handed it over: coverage widened,
+    baseline reseeded, tree still unjudged, everything green. Measured on a real repo: 13 of its 17
+    unjudged Spanish lines lived in one Jenkinsfile."""
+    repo = _repo(tmp_path / "repo", {
+        "Jenkinsfile": "pipeline {\n  // plain english comment\n  agent any\n}\n",
+        "a.py": "# english\n",
+    })
+    assert _run(["update-baseline", "--ext", "all"], repo) == 0
+    (repo / "Jenkinsfile").write_text(
+        "pipeline {\n  // Esto es una linea que tiene palabras del otro idioma\n  agent any\n}\n",
+        encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    assert _run(["check", "--ext", "all"], repo) == 1
+
+
+def test_slash_comments_are_prose(tmp_path):
+    """`#` covered Python, shell, YAML and TOML; Groovy uses `//`, and that is the style the CI
+    pipelines carrying the WHY of a project are written in."""
+    from darnlang.detect import is_commentish
+    assert is_commentish("  // porque el build fallo")
+    assert is_commentish("  /* cuando esto pasa */")
+    assert is_commentish("   * y esta linea de bloque")
+
+
+def test_a_named_code_file_matches_by_basename_not_by_suffix(tmp_path):
+    """`Jenkinsfile.lang_coverage` is judged by its extension like anything else, and a document
+    called `my_Dockerfile_notes.md` stays a document. A suffix comparison would get both wrong."""
+    from darnlang.detect import family
+    assert family("Jenkinsfile") == "code"
+    assert family("ci/Jenkinsfile") == "code"
+    assert family("notes/my_Dockerfile_notes.md") == "doc"
+
+
+def test_config_files_are_code_so_only_their_comments_are_judged(tmp_path):
+    """A YAML value is data and firing on it is how a gate gets switched off; a YAML COMMENT is
+    prose somebody wrote to be read."""
+    from darnlang.detect import build_pattern, offending
+    pat = build_pattern(None)
+    assert offending("# esto explica por que el pin esta clavado", "ci.yml", pat)
+    assert not offending("description: cuando", "ci.yml", pat)

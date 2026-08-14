@@ -15,7 +15,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from .detect import ESCAPE, family, is_fence, offending, strip_verbatim
+from .detect import CODE_NAMES, ESCAPE, family, is_fence, offending, strip_verbatim
 
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", "_build", "build", "dist",
              ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox", "site-packages"}
@@ -94,6 +94,22 @@ class NothingToScan(Exception):
     """
 
 
+def in_scope(rel: str, exts: tuple[str, ...]) -> bool:
+    """Whether this path is inside the scan's scope.
+
+    NOT just a suffix test, and that is the whole reason this is a function. A `Jenkinsfile` has no
+    extension, so `endswith(exts)` rejects it however wide `--ext` is -- which made the file family
+    added for CI pipelines classify them correctly and then never hand them to the scan. The bug
+    would have been invisible: coverage widened, baseline reseeded, tree still unjudged, all green.
+    """
+    if not exts:
+        return True
+    if rel.lower().endswith(exts):
+        return True
+    base = rel.replace("\\", "/").rsplit("/", 1)[-1]
+    return base in CODE_NAMES
+
+
 def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = True,
               tracked_only: bool = True, exclude: tuple[str, ...] = ()) -> list[Hit]:
     """Every offending line under `root`.
@@ -119,7 +135,7 @@ def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = Tr
         raise NothingToScan(
             f"no files to scan under {root}. If this is a git repo, nothing is committed yet "
             f"(a scan of zero files is not a clean scan); otherwise check the path.")
-    if exts and not any(rel.lower().endswith(exts) for rel in files):
+    if exts and not any(in_scope(rel, exts) for rel in files):
         raise NothingToScan(
             f"none of the {len(files)} files under {root} match {', '.join(exts)}. "
             f"Widen --ext, or you are measuring nothing.")
@@ -127,7 +143,7 @@ def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = Tr
     unread: list[str] = []
     skip = {os.path.normpath(p) for p in exclude}
     for rel in files:
-        if exts and not rel.lower().endswith(exts):
+        if not in_scope(rel, exts):
             continue
         if os.path.normpath(rel) in skip:
             continue
@@ -244,7 +260,7 @@ def scan_diff(root: str, ref: str | None, exts: tuple[str, ...], pattern) -> lis
             continue
         if ln.startswith("+") and not ln.startswith("+++"):
             body = ln[1:]
-            if path and (not exts or path.lower().endswith(exts)):
+            if path and in_scope(path, exts):
                 if offending(body, path, pattern, lineno in fenced):
                     hits.append(Hit(path, lineno, body.strip()))
             lineno += 1
