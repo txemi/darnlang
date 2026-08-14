@@ -519,3 +519,46 @@ def test_an_empty_wordlist_path_is_refused_not_ignored(tmp_path):
     repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
     assert _run(["update-baseline"], repo) == 0
     assert _run(["check", "--extra-words-file", ""], repo) == 3
+
+
+# --- the detector must not judge its own dictionary -----------------------------------------------
+
+def test_an_autodetected_wordlist_is_not_itself_scanned(tmp_path):
+    """A wordlist is a file whose every line is, by construction, a word in the language being
+    hunted. Scanned as prose it yields one finding per line, forever, and none of them mean
+    anything. Measured on a real consumer shipping a 100-word list: 100 of its 129 findings were
+    that single file -- and the file exists BECAUSE of the gate, so the gate was inflating its own
+    number more than fourfold with debt nobody could ever pay down."""
+    repo = _repo(tmp_path / "repo", {
+        "tools/spanish_words.txt": "porque\ncuando\nmientras\naunque\n",
+        "a.py": "# plain english comment\n",
+    })
+    assert _run(["update-baseline", "--ext", "all"], repo) == 0
+    baseline = json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))
+    assert baseline["count"] == 0, (
+        f"the wordlist was judged as prose: {baseline['count']} finding(s) from a file that "
+        f"exists to define the detector")
+
+
+def test_an_explicit_wordlist_inside_the_repo_is_not_scanned_either(tmp_path):
+    """Being named on a command line rather than found by convention does not make a file's
+    contents any more English."""
+    repo = _repo(tmp_path / "repo", {
+        "my_words.txt": "porque\ncuando\nmientras\n",
+        "a.py": "# plain english comment\n",
+    })
+    assert _run(["update-baseline", "--ext", "all",
+                 "--extra-words-file", str(repo / "my_words.txt")], repo) == 0
+    baseline = json.loads((repo / ".darnlang-baseline.json").read_text(encoding="utf-8"))
+    assert baseline["count"] == 0, "an explicitly passed wordlist was judged as prose"
+
+
+def test_a_wordlist_outside_the_repo_does_not_silently_exclude_nothing(tmp_path):
+    """The scan compares repo-relative names, so keeping an outside path as an absolute would make
+    the exclusion look applied while matching nothing. Dropping it is the honest answer, and the
+    tree must still be judged normally."""
+    from darnlang.cli import wordlist_paths
+    repo = _repo(tmp_path / "repo", {"a.py": "# english\n"})
+    outside = tmp_path / "elsewhere.txt"
+    outside.write_text("porque\n", encoding="utf-8")
+    assert wordlist_paths(str(repo), str(outside)) == ()

@@ -83,8 +83,7 @@ def _autodetected(root: str) -> list[str] | None:
     the detector behind your back; only an explicit `--words-file` may, because that is a decision
     somebody typed.
     """
-    path = next((p for p in (os.path.join(root, n) for n in WORDS_FILENAMES)
-                 if os.path.exists(p)), None)
+    path = _autodetected_path(root)
     if not path:
         return None
     words = _read_words(path)
@@ -92,6 +91,46 @@ def _autodetected(root: str) -> list[str] | None:
         print(f"darnlang: adding {len(words)} word(s) from {os.path.relpath(path, root)} "
               f"to the built-in list.", file=sys.stderr)
     return words
+
+
+def _autodetected_path(root: str) -> str | None:
+    """Where the conventional wordlist lives, if it does.
+
+    Split out from reading it so the SCAN can be told to skip that file -- see `wordlist_paths`.
+    """
+    return next((p for p in (os.path.join(root, n) for n in WORDS_FILENAMES)
+                 if os.path.exists(p)), None)
+
+
+def wordlist_paths(root: str, *paths: str | None) -> tuple[str, ...]:
+    """Repo-relative paths of every wordlist in play, so the tree scan can skip them.
+
+    THE DETECTOR MUST NOT JUDGE ITS OWN DICTIONARY. A wordlist is a file whose every line is, by
+    construction, a word in the language being hunted, so judging it yields one finding per line and
+    not one of them means anything. Measured on a repo shipping a 100-word list: 100 of its 129
+    findings came from that single file -- and the file exists BECAUSE of the gate, so the gate was
+    inflating its own number more than fourfold and there was no way to bring it down.
+
+    Explicit flags count, not just the conventional name: `--words-file` and `--extra-words-file`
+    usually point inside the repo, and a file being named on a command line rather than found by
+    convention does not make its contents any more English.
+
+    Paths outside `root` are dropped rather than kept absolute. The scan compares repo-relative
+    names, so an absolute path would silently never match -- the exclusion would look applied while
+    doing nothing, which is the failure mode this whole codebase is written against.
+    """
+    out: list[str] = []
+    root_real = os.path.realpath(root)
+    for p in (*paths, _autodetected_path(root)):
+        if not p:
+            continue
+        real = os.path.realpath(p)
+        try:
+            if os.path.commonpath([real, root_real]) == root_real:
+                out.append(os.path.relpath(real, root_real))
+        except ValueError:      # different drives on Windows
+            continue
+    return tuple(dict.fromkeys(out))
 
 
 def _words(root: str, arg: str | None) -> list[str] | None:
@@ -238,7 +277,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        hits = scan_tree(root, exts, pattern, filenames=not args.no_filenames)
+        hits = scan_tree(root, exts, pattern, filenames=not args.no_filenames,
+                         exclude=wordlist_paths(root, getattr(args, "words_file", None),
+                                                getattr(args, "extra_words_file", None)))
     except NothingToScan as exc:
         # Exit 3 (environment), never 0. "I examined nothing" is not "I found nothing", and the
         # difference is the whole reliability of a ratchet: a baseline seeded against zero files

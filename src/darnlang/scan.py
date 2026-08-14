@@ -95,7 +95,7 @@ class NothingToScan(Exception):
 
 
 def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = True,
-              tracked_only: bool = True) -> list[Hit]:
+              tracked_only: bool = True, exclude: tuple[str, ...] = ()) -> list[Hit]:
     """Every offending line under `root`.
 
     `tracked_only` asks git for the file list, which is what you almost always want: an untracked
@@ -104,6 +104,13 @@ def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = Tr
 
     `filenames` also judges the NAME of each file. No ancestor of this tool did that, it costs
     nothing, and a file called `investigacion_de_errores.py` is exactly as public as its contents.
+
+    `exclude` is repo-relative paths the caller knows must not be judged. It exists for exactly one
+    thing today and the thing is not cosmetic: THE DETECTOR MUST NOT JUDGE ITS OWN DICTIONARY. A
+    wordlist is a file whose every line is, by construction, a word in the language being hunted, so
+    scanning it yields one finding per line, forever, and not one of them means anything. Measured on
+    a repo that ships a 100-word list: 100 of its 129 findings were that single file. Left in, the
+    number stops being a debt count and becomes noise that punishes whoever tries to bring it down.
 
     Raises NothingToScan when the file list is empty, or when no file matched `exts`.
     """
@@ -118,8 +125,11 @@ def scan_tree(root: str, exts: tuple[str, ...], pattern, *, filenames: bool = Tr
             f"Widen --ext, or you are measuring nothing.")
     hits: list[Hit] = []
     unread: list[str] = []
+    skip = {os.path.normpath(p) for p in exclude}
     for rel in files:
         if exts and not rel.lower().endswith(exts):
+            continue
+        if os.path.normpath(rel) in skip:
             continue
         try:
             with open(os.path.join(root, rel), encoding="utf-8") as fh:
