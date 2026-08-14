@@ -25,11 +25,11 @@ the least retractable ones you have. An indexed pull-request title cannot be tak
 
 ```bash
 # no install at all
-uvx --from git+https://github.com/txemi/darnlang@v0.4.0 darnlang check
+uvx --from git+https://github.com/txemi/darnlang@v0.9.0 darnlang check
 
 # or properly
-pipx install git+https://github.com/txemi/darnlang@v0.4.0
-pip install 'darnlang[strict] @ git+https://github.com/txemi/darnlang@v0.4.0'   # + deep layer
+pipx install git+https://github.com/txemi/darnlang@v0.9.0
+pip install 'darnlang[strict] @ git+https://github.com/txemi/darnlang@v0.9.0'   # + deep layer
 ```
 
 <sub>Once it is published the short forms — `uvx darnlang`, `pip install darnlang` — start working
@@ -145,7 +145,7 @@ A genuine false positive is silenced with `lang-ok` on the line — `# lang-ok` 
 ```yaml
 repos:
   - repo: https://github.com/txemi/darnlang
-    rev: v0.4.0
+    rev: v0.9.0
     hooks:
       - id: darnlang           # added lines only
       - id: darnlang-commit-msg
@@ -154,7 +154,7 @@ repos:
 **GitHub Actions** — the three published surfaces, which is the point of the tool:
 
 ```yaml
-- uses: txemi/darnlang@v0.4.0
+- uses: txemi/darnlang@v0.9.0
   with:
     ext: .py,.md
     surfaces: files,commits,pr    # issues need their own workflow: see action.yml
@@ -172,7 +172,7 @@ stage('darnlang') {
       # uvx needs no venv and leaves nothing behind. Pin the ref: a version that cannot be resolved
       # fails with rc=1, which a naive pipeline then reports as "wrong language".
       export PATH="$HOME/.local/bin:$PATH"
-      uvx --from git+https://github.com/txemi/darnlang@v0.4.0 darnlang check --ext .py,.md
+      uvx --from git+https://github.com/txemi/darnlang@v0.9.0 darnlang check --ext .py,.md
     '''
   }
 }

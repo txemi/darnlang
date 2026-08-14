@@ -2,7 +2,7 @@
 #
 #   repos:
 #     - repo: https://github.com/txemi/darnlang
-#       rev: v0.4.0
+#       rev: v0.9.0
 #       hooks: [{id: darnlang}, {id: darnlang-commit-msg}]
 #
 # Two hooks and not one, because they guard different things at different moments: `darnlang` judges
