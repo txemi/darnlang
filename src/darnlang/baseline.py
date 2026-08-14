@@ -29,6 +29,10 @@ class Baseline:
     scanned_exts: list[str] | None
     files: dict[str, int]
     exists: bool = True
+    #: Extensionless files judged by NAME (Jenkinsfile, Dockerfile, ...). Recorded separately
+    #: because they cannot be expressed as extensions, and a coverage record that cannot express
+    #: part of its coverage is a blind spot -- see `coverage_changed`.
+    scanned_names: list[str] | None = None
 
 
 def load(path: str) -> Baseline | None:
@@ -39,24 +43,46 @@ def load(path: str) -> Baseline | None:
                         # Absent means "written before this field existed", NOT "counts nothing".
                         # A consumer on the old format must not fail on a key it never heard of.
                         scanned_exts=data.get("scanned_exts"),
+                        scanned_names=data.get("scanned_names"),
                         files=data.get("files") or {})
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
 
-def save(path: str, count: int, exts: list[str], per_file: dict[str, int]) -> None:
+def save(path: str, count: int, exts: list[str], per_file: dict[str, int],
+         names: list[str] | None = None) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    payload = {"count": count, "note": NOTE, "scanned_exts": sorted(exts),
+               "scanned_names": sorted(names or []),
+               "files": dict(sorted(per_file.items()))}
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"count": count, "note": NOTE, "scanned_exts": sorted(exts),
-                   "files": dict(sorted(per_file.items()))}, fh, indent=2)
+        json.dump(payload, fh, indent=2)
         fh.write("\n")
 
 
-def coverage_changed(base: Baseline, exts: list[str]) -> tuple[list[str], list[str]] | None:
-    """(gained, lost) when the recorded coverage differs from the current one, else None."""
+def coverage_changed(base: Baseline, exts: list[str],
+                     names: list[str] | None = None) -> tuple[list[str], list[str]] | None:
+    """(gained, lost) when the recorded coverage differs from the current one, else None.
+
+    NAMES ARE PART OF COVERAGE, and leaving them out was a blind spot with weight on it. The
+    extensionless CI files -- Jenkinsfile, Dockerfile, Makefile -- are genuinely judged, and one
+    consumer already carries a live `Jenkinsfile` entry in its baseline. But `scanned_exts` cannot
+    represent them, so if the basename branch of `in_scope()` ever narrowed or broke, the count
+    would FALL and the ratchet would report it as a win: "it went DOWN, lock it in". That is the
+    precise failure this whole file exists to refuse, hiding in the one dimension the record could
+    not express.
+
+    An absent `scanned_names` means the baseline predates the field. Treated as "unknown", not as
+    "empty": inferring zero would turn every old baseline into a spurious coverage GAIN on the next
+    run, and a gate that cries wolf on adoption is one people stop reading.
+    """
     if base.scanned_exts is None:
         return None
-    now, was = set(exts), set(base.scanned_exts)
-    if now == was:
+    gained = sorted(set(exts) - set(base.scanned_exts))
+    lost = sorted(set(base.scanned_exts) - set(exts))
+    if base.scanned_names is not None and names is not None:
+        gained += sorted(set(names) - set(base.scanned_names))
+        lost += sorted(set(base.scanned_names) - set(names))
+    if not gained and not lost:
         return None
-    return sorted(now - was), sorted(was - now)
+    return gained, lost

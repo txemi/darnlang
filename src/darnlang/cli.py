@@ -19,7 +19,7 @@ import os
 import sys
 
 from . import baseline as bl
-from .detect import (CODE_EXTS, DEFAULT_ALLOWED, DOC_EXTS, ESCAPE, build_pattern,
+from .detect import (CODE_EXTS, CODE_NAMES, DEFAULT_ALLOWED, DOC_EXTS, ESCAPE, build_pattern,
                      langdetect_is_foreign, strip_verbatim)
 from .project import ForeignBaseline, baseline_path, project_root
 
@@ -297,14 +297,14 @@ def main(argv: list[str] | None = None) -> int:
         # same narrowing. A ratchet whose write path is laxer than its read path is not a ratchet.
         prev = bl.load(bpath)
         if prev is not None:
-            changed = bl.coverage_changed(prev, list(exts))
+            changed = bl.coverage_changed(prev, list(exts), sorted(CODE_NAMES))
             if changed and changed[1] and not args.allow_narrower:
                 print(f"darnlang: refusing to write a NARROWER baseline. It would stop counting "
                       f"{', '.join(changed[1])}, and bake that reduction in as the new floor.",
                       file=sys.stderr)
                 print("If you mean it, say so: --allow-narrower.", file=sys.stderr)
                 return 2
-        bl.save(bpath, n, list(exts), per_file)
+        bl.save(bpath, n, list(exts), per_file, sorted(CODE_NAMES))
         print(f"darnlang: baseline updated to {n} across {len(per_file)} file(s) "
               f"(covering {', '.join(exts)}).")
         return 0
@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
               f"Create it with `darnlang update-baseline`.", file=sys.stderr)
         return 3
 
-    changed = bl.coverage_changed(base, list(exts))
+    changed = bl.coverage_changed(base, list(exts), sorted(CODE_NAMES))
     if changed is not None:
         gained, lost = changed
         print(f"darnlang: COVERAGE CHANGED -- the baseline counted "

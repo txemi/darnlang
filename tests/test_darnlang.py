@@ -608,3 +608,26 @@ def test_config_files_are_code_so_only_their_comments_are_judged(tmp_path):
     pat = build_pattern(None)
     assert offending("# esto explica por que el pin esta clavado", "ci.yml", pat)
     assert not offending("description: cuando", "ci.yml", pat)
+
+
+def test_losing_basename_coverage_is_not_reported_as_a_win(tmp_path):
+    """`scanned_exts` cannot represent the extensionless CI files, so before this the ratchet had a
+    blind spot with weight on it: a consumer already carries a live `Jenkinsfile` entry. If the
+    basename branch of `in_scope()` ever narrowed, the count would FALL and the tool would print
+    "it went DOWN, lock the win in" -- a congratulation for losing coverage, which is the precise
+    failure this project exists to refuse, hiding in the one dimension the record could not express."""
+    from darnlang import baseline as bl
+    base = bl.Baseline(count=5, scanned_exts=[".py"], files={}, scanned_names=["Jenkinsfile"])
+    assert bl.coverage_changed(base, [".py"], names=["Jenkinsfile"]) is None
+    gained, lost = bl.coverage_changed(base, [".py"], names=[])
+    assert lost == ["Jenkinsfile"] and not gained
+
+
+def test_a_baseline_without_scanned_names_is_unknown_not_empty(tmp_path):
+    """Inferring "empty" from an absent field would turn every pre-existing baseline into a
+    spurious coverage GAIN on the next run, and a gate that cries wolf on adoption is one people
+    stop reading."""
+    from darnlang import baseline as bl
+    old = bl.Baseline(count=5, scanned_exts=[".py"], files={})
+    assert old.scanned_names is None
+    assert bl.coverage_changed(old, [".py"], names=["Jenkinsfile"]) is None
