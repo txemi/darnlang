@@ -1,0 +1,17 @@
+{
+  "ref": "git+https://github.com/txemi/darnlink@3896cbcf26658f18ff7f25761ba4c3db4b8cbfe9",
+  "ref_comment": "v0.26.0 — pinned by SHA: uvx resolves a tag over the network on every call (measured 5-8 s vs 0.1 s)",
+  "recipe_sha256": "c068f66c166672777f2d63b38ff5d97a61a9ab7288a7c830b8e35520be26c6dd",
+  "excludes": [
+    ".venv",
+    ".git",
+    "node_modules",
+    "worktrees"
+  ],
+  "mode": "max",
+  "scope": "repo",
+  "web": true,
+  "dangling": "repo",
+  "dangling_max": 0,
+  "default_branch": "main"
+}

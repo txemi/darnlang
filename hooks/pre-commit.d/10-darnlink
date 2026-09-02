@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# pre-commit darnlink gate (staged; whole-repo en pre-push+CI). Config en darnlink-gate.json.
+set -euo pipefail
+mapfile -t FILES < <(git diff --cached --name-only --diff-filter=ACMRD -- '*.md')
+[ "${#FILES[@]}" -eq 0 ] && exit 0
+command -v darnlink-gate >/dev/null 2>&1 || { echo "darnlink pre-commit: darnlink-gate no en PATH -> SALTO." >&2; exit 0; }
+export DARNLINK_GATE_SCOPE=staged
+export DARNLINK_GATE_WEB=0
+exec darnlink-gate
