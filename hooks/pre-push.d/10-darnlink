@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# pre-push darnlink WHOLE-REPO wall (+ web-check). Config en darnlink-gate.json.
+set -euo pipefail
+command -v darnlink-gate >/dev/null 2>&1 || { echo "darnlink pre-push: darnlink-gate no en PATH -> SALTO (CI cubre)." >&2; exit 0; }
+exec darnlink-gate
