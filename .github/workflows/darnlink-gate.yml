@@ -1,0 +1,66 @@
+# darnlink-gate — the server-side link wall of this repo.
+#
+# Why it exists HERE and not only in the local hooks: the local fragments
+# (hooks/pre-commit.d/10-darnlink, hooks/pre-push.d/10-darnlink) fail OPEN on any machine
+# without the recipe on PATH — and an external contributor of a public repo does not even
+# have the hooks dispatcher configured. Their skip message says "CI covers the wall", so CI
+# must actually cover it: this workflow is that cover. Without it the repo is back to the
+# pattern this adoption fixed — a wall that looks protective and never looks.
+#
+# Mechanics (fleet-standard): no hand-rolled wrapper. The ONE generic `darnlink-gate` recipe
+# is fetched from the public darnlink repo at the ref pinned in darnlink-gate.json (single
+# source — bumping the pin is one edit to that json), verified against `recipe_sha256` before
+# it runs (a tag is mutable; the checksum turns a moved tag into a named red build), and run
+# fail-closed: on the server the gate IS the wall, and failing open there means a green build
+# with zero files validated.
+
+name: darnlink-gate
+
+# Both branch names listed on purpose: this repo lives on `main`, but listing a branch that
+# does not exist costs nothing and makes the copied-to-a-master-repo failure impossible. A
+# workflow that never triggers is not red anywhere — it is nothing anywhere.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv (brings uvx; uvx fetches darnlink itself, credential-less)
+        uses: astral-sh/setup-uv@v5
+
+      - name: Derive the recipe version from darnlink-gate.json (single source)
+        run: |
+          VER=$(grep -oE 'darnlink@(v[0-9]+[.][0-9]+[.][0-9]+|[0-9a-f]{40})' darnlink-gate.json | head -1 | cut -d@ -f2)
+          test -n "$VER" || { echo "::error::could not derive the darnlink version from darnlink-gate.json"; exit 1; }
+          echo "DARNLINK_GATE_VERSION=$VER" >> "$GITHUB_ENV"
+
+      - name: Fetch the pinned recipe and verify its checksum
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/txemi/darnlink/${DARNLINK_GATE_VERSION}/recipes/darnlink-gate" -o "${RUNNER_TEMP}/darnlink-gate"
+          WANT=$(python3 -c 'import json;print(json.load(open("darnlink-gate.json")).get("recipe_sha256",""))')
+          if [ -n "$WANT" ]; then
+            GOT=$(sha256sum "${RUNNER_TEMP}/darnlink-gate" | cut -d' ' -f1)
+            [ "$GOT" = "$WANT" ] || { echo "::error::recipe checksum mismatch for ${DARNLINK_GATE_VERSION}: expected ${WANT}, got ${GOT} — the tag moved, or the fetch was tampered with"; exit 1; }
+          else
+            echo "::warning::darnlink-gate.json has no recipe_sha256 — this fetch is UNVERIFIED."
+          fi
+          chmod +x "${RUNNER_TEMP}/darnlink-gate"
+
+      # GITHUB_TOKEN is the workflow's automatic token: the web axis needs it for QUOTA, not
+      # permission — anonymous API calls are 60/h per public IP, shared by every runner behind
+      # the same NAT, so without it web findings come back `web_unverifiable` (which reads as
+      # "nothing to check" and can be a false green).
+      - name: darnlink gate (whole repo, fail-closed)
+        env:
+          DARNLINK_GATE_FAIL_CLOSED: '1'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: '"${RUNNER_TEMP}/darnlink-gate"'
