@@ -33,4 +33,4 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr.txt"
-          uv run darnlang prose "$RUNNER_TEMP/pr.txt" --label "PR title/description"
+          bash tools/lang_gate.sh pr-text "$RUNNER_TEMP/pr.txt"

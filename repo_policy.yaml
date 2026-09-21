@@ -1,0 +1,16 @@
+# Where this repository lives. The operational detail (hosts, backups, CI server)
+# is kept in the private infrastructure repository, not here.
+version: 1
+fuente_de_verdad:
+  remote: forgejo
+  what: "Self-hosted forge. Branches, pull requests and reviews happen there."
+espejo:
+  remote: origin
+  url: "https://github.com/txemi/darnlang.git"
+  what: "Public GitHub mirror of main, pushed by the forge. Read-only: never push to it by hand."
+respaldo_offsite:
+  what: "The public GitHub mirror, plus the forge's own backups."
+ci:
+  job: "darnlang__forgejo"
+  file: "Jenkinsfile"
+  required_on_forge: false
