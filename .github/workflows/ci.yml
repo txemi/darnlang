@@ -23,9 +23,8 @@ jobs:
       # A venv, not `--system`: GitHub runners ship an externally managed interpreter, and
       # `uv pip install --system` fails on it. `uv run` then uses that venv on both OSes,
       # which is also why the Windows job could find the package but not pytest.
-      - run: uv venv --clear   # setup-uv already makes one when given a python-version
-      - run: uv pip install -e ".[dev]"
-      - run: uv run pytest -q
+      - name: Tests, then the tree judged by this very checkout (shared with Jenkins)
+        run: bash tools/check.sh
 
   # Layer 3 has two behaviours and they need two environments: WITH langdetect it must catch what
   # the cheap layers miss, WITHOUT it `--strict` must refuse rather than report clean. `[dev]` now
@@ -36,16 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv venv --clear
-      - run: uv pip install -e . pytest        # deliberately NOT .[dev]
-      - run: uv run pytest -q
-      - name: --strict must refuse without the extra, never report clean
-        run: |
-          set +e
-          uv run darnlang prose README.md --strict
-          rc=$?
-          set -e
-          [ "$rc" = "3" ] || { echo "expected rc=3, got $rc"; exit 1; }
+      - name: Tests without the strict extra; --strict must then refuse, never report clean
+        run: bash tools/check.sh no-strict
 
   # Every YAML this repo SHIPS must parse. `action.yml` shipped broken through two tags -- an
   # unquoted `": "` inside a description -- and nothing noticed, because the only thing that would
@@ -56,23 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Every shipped YAML parses
-        run: |
-          python3 - <<'PY'
-          import pathlib, sys, yaml
-          bad = []
-          for p in sorted(pathlib.Path('.').rglob('*.y*ml')):
-              if '.git/' in str(p):
-                  continue
-              try:
-                  yaml.safe_load(p.read_text(encoding='utf-8'))
-              except Exception as exc:
-                  bad.append(f'{p}: {exc}')
-          # Extensionless YAML that ships as an example is covered by name, since rglob misses it.
-          for extra in ('examples/Jenkinsfile',):
-              pathlib.Path(extra).exists() or bad.append(f'{extra}: missing')
-          print('\n'.join(bad) or f'ok')
-          sys.exit(1 if bad else 0)
-          PY
+        run: python3 tools/yaml_check.py
 
   # Dogfood. A language gate that is not clean in its own repo has no argument to make.
   self:

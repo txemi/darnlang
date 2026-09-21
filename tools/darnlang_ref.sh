@@ -10,3 +10,5 @@
 # else. Gating this repo with an older release would let a regression through on the very commit
 # that introduces it, and would not exercise the code being changed.
 export DARNLANG_REF="."
+# The strict build of this very checkout (see tools/lang_gate.sh).
+export DARNLANG_STRICT_REF=".[strict]"
