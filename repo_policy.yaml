@@ -1,16 +1,23 @@
-# Where this repository lives. The operational detail (hosts, backups, CI server)
-# is kept in the private infrastructure repository, not here.
+# Remote policy. Internal detail (hosts, backups, CI servers) lives in the private infrastructure repo.
 version: 1
+
 fuente_de_verdad:
-  remote: forgejo
-  what: "Self-hosted forge. Branches, pull requests and reviews happen there."
+  remoto: forgejo
+  como_empujar: "git push forgejo main"
+
 espejo:
-  remote: origin
-  url: "https://github.com/txemi/darnlang.git"
-  what: "Public GitHub mirror of main, pushed by the forge. Read-only: never push to it by hand."
+  remoto: origin
+  url_tipica: "https://github.com/txemi/darnlang.git"
+  push_directo: prohibido
+  excepciones: ninguna_por_rama
+
 respaldo_offsite:
-  what: "The public GitHub mirror, plus the forge's own backups."
+  estado: activo_no_verificado
+
 ci:
   job: "darnlang__forgejo"
-  file: "Jenkinsfile"
-  required_on_forge: false
+  contexto_exigido: null
+  exigido_en_forgejo: false
+  motivo: >
+    The job already reports on main under the context "darnlang__forgejo/pipeline/head". Setting
+    contexto_exigido and flipping exigido_en_forgejo to true is a separate one-line change.
