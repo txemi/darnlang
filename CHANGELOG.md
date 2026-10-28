@@ -4,6 +4,14 @@ All notable changes to darnlang are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Removed
+
+- `repo_policy.yaml`, `repo_policy.schema.json` and `tools/repo_policy_check.py`, with their CI
+  stage. They were maintainer tooling, not part of the package, and no longer live in this
+  repository.
+
 ## [0.7.0] — 2026-08-13
 
 Two defects found by an adversarial review of the workflow that publishes comments to strangers.
