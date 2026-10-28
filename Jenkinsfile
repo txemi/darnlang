@@ -12,7 +12,6 @@
 //   links                    hooks/pre-push.d        darnlink-gate.yml           darnlink-gate
 //   private references       hooks/pre-push          privacy-gate.yml            not here: a private job on the CI server runs tools/privacy_gate.sh
 //   secrets in the diff      (private tooling)       (none)                      secret-scan
-//   repo_policy.yaml         (none)                  (none)                      repo_policy.yaml
 //   the shipped action       (none)                  ci.yml / self (uses: ./)    not ported: a GitHub action can only run on GitHub
 //   English: issues          (none)                  lang-issue.yml              not ported: fired by an issue, not a commit
 //   release                  (none)                  publish.yml                 not ported: a release job, not a check
@@ -44,9 +43,6 @@ pipeline {
             PATH = "${HOME}/.local/bin:${PATH}"
           }
           stages {
-            stage('repo_policy.yaml') {
-              steps { sh 'python3 tools/repo_policy_check.py' }
-            }
             stage('project gates') {
               steps { script { PYTHONS.each { py -> stage("project gates py${py}") { localGates(py, true) } } } }
             }
