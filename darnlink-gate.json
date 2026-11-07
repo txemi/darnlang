@@ -1,7 +1,7 @@
 {
-  "ref": "git+https://github.com/txemi/darnlink@c2029ee0963a8a610beaa5e1d0982358d67e4913",
-  "ref_tag": "v0.29.0",
-  "ref_comment": "v0.29.0 (published tag, commit c2029ee) — pinned by SHA: uvx resolves a tag over the network on every call (5-8 s vs 0.1 s).",
+  "ref": "git+https://github.com/txemi/darnlink@84e2db4db1055a0fedd6b7a2c826269f282c9d26",
+  "ref_tag": "v0.30.0",
+  "ref_comment": "v0.30.0 (tag publicado, commit 84e2db4). v0.29.0 (published tag, commit c2029ee) — pinned by SHA: uvx resolves a tag over the network on every call (5-8 s vs 0.1 s).",
   "recipe_sha256": "47354c3a3b5e145bac3207a8869a63f8fc932f91512ae02d2a801a58535cabfd",
   "excludes": [
     ".venv",
