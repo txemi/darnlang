@@ -80,7 +80,18 @@ pipeline {
               steps { sh 'uv run --no-project --with pyyaml python3 tools/yaml_check.py' }
             }
             stage('darnlink-gate') {
-              steps { sh 'bash tools/darnlink_gate.sh' }
+              steps {
+                script {
+                  // darnlink runs here with darnlinkGate(), the copy of fetch-verify-run that darnlink itself ships
+                  // (vars/darnlinkGate.groovy): the library is loaded for this build at the version after the @ in
+                  // darnlink-gate.json `ref`, the only pin. tools/darnlink_gate.sh stays for the GitHub workflow,
+                  // which cannot load a Jenkins library. Needs v0.33.1 or later (earlier tags carry symlinks).
+                  def ver = sh(returnStdout: true, script: "python3 -c 'import json;print(json.load(open(\"darnlink-gate.json\"))[\"ref\"].rsplit(\"@\",1)[1])'").trim()
+                  library identifier: "darnlink@${ver}", retriever: legacySCM([$class: 'GitSCM',
+                    branches: [[name: ver]], userRemoteConfigs: [[url: 'https://github.com/txemi/darnlink.git']]])
+                  withEnv(['DARNLINK_GATE_FAIL_CLOSED=1']) { darnlinkGate() }
+                }
+              }
             }
             stage('smoke') {
               steps { sh 'uvx --from . darnlang check --ext all' }
